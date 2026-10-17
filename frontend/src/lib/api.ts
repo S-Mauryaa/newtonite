@@ -1,15 +1,42 @@
-const apiBaseUrl = (import.meta.env.VITE_API_URL || "http://localhost:5001/api").replace(
-  /\/+$/,
-  "",
-);
+function resolveApiBaseUrl(): string {
+  const configuredUrl = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
+  let url: URL;
 
-interface ApiRequestOptions {
+  try {
+    url = new URL(configuredUrl);
+  } catch {
+    throw new Error("VITE_API_URL must be an absolute HTTP or HTTPS URL.");
+  }
+
+  const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+  const sameOrigin =
+    typeof window !== "undefined" && url.origin === window.location.origin;
+  if (
+    (url.protocol !== "https:" && !(url.protocol === "http:" && (localHosts.has(url.hostname) || sameOrigin))) ||
+    url.username ||
+    url.password
+  ) {
+    throw new Error("VITE_API_URL must use HTTPS or a trusted local HTTP origin.");
+  }
+
+  return url.toString().replace(/\/+$/, "");
+}
+
+const apiBaseUrl = resolveApiBaseUrl();
+
+export interface ApiRequestOptions {
   method?: "GET" | "POST" | "PATCH";
   token?: string;
   idempotencyKey?: string;
   body?: unknown;
   signal?: AbortSignal;
+  onUnauthorized?: () => void;
 }
+
+export type AuthenticatedApiRequestOptions = Omit<
+  ApiRequestOptions,
+  "token" | "onUnauthorized"
+>;
 
 interface ApiErrorResponse {
   error?: {
@@ -46,7 +73,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-async function request(
+export async function apiRequest(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<unknown> {
@@ -66,6 +93,7 @@ async function request(
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     signal: options.signal,
+    credentials: "omit",
   });
 
   let payload: unknown;
@@ -79,6 +107,9 @@ async function request(
   }
 
   if (!response.ok) {
+    if (response.status === 401 && options.token) {
+      options.onUnauthorized?.();
+    }
     const error = isRecord(payload) ? (payload as ApiErrorResponse).error : undefined;
     const message =
       typeof error?.message === "string"
@@ -99,7 +130,7 @@ export interface BackendHealth {
 export async function getBackendHealth(
   signal?: AbortSignal,
 ): Promise<BackendHealth> {
-  const payload = await request("/health", { signal });
+  const payload = await apiRequest("/health", { signal });
   if (
     !isRecord(payload) ||
     payload.status !== "ok" ||
@@ -108,4 +139,184 @@ export async function getBackendHealth(
     throw new ApiError("The backend returned an unexpected health response.", 200, "INVALID_RESPONSE");
   }
   return { status: "ok", message: payload.message };
+}
+
+export type TeamRole = "VIEWER" | "MEMBER" | "LEAD" | "ADMIN";
+
+export interface AuthenticatedUser {
+  id: string;
+  name: string;
+  email: string;
+  memberships: Array<{
+    role: TeamRole;
+    team: { id: string; name: string; slug: string };
+  }>;
+}
+
+export interface LoginResult {
+  accessToken: string;
+  tokenType: "Bearer";
+  expiresIn: string;
+  user: AuthenticatedUser;
+}
+
+export type WorkItemStatus =
+  | "OPEN"
+  | "IN_PROGRESS"
+  | "AWAITING_APPROVAL"
+  | "RESOLVED"
+  | "CLOSED";
+
+export type WorkItemPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+
+export interface WorkItem {
+  id: string;
+  title: string;
+  type: string;
+  status: WorkItemStatus;
+  priority: WorkItemPriority;
+  dueDate: string | null;
+  team: { id: string; name: string; slug: string };
+  assignee: { id: string; name: string } | null;
+}
+
+export interface WorkItemListQuery {
+  teamId: string;
+  status?: WorkItemStatus;
+  priority?: WorkItemPriority;
+  search?: string;
+  cursor?: string;
+  pageSize?: number;
+}
+
+export interface WorkItemListPage {
+  data: WorkItem[];
+  meta: { nextCursor: string | null };
+}
+
+function isWorkItemStatus(value: unknown): value is WorkItemStatus {
+  return ["OPEN", "IN_PROGRESS", "AWAITING_APPROVAL", "RESOLVED", "CLOSED"].includes(
+    String(value),
+  );
+}
+
+function isWorkItemPriority(value: unknown): value is WorkItemPriority {
+  return ["LOW", "MEDIUM", "HIGH", "URGENT"].includes(String(value));
+}
+
+function isWorkItem(value: unknown): value is WorkItem {
+  if (!isRecord(value)) return false;
+  const validAssignee =
+    value.assignee === null ||
+    (isRecord(value.assignee) &&
+      typeof value.assignee.id === "string" &&
+      typeof value.assignee.name === "string");
+  const validTeam =
+    isRecord(value.team) &&
+    typeof value.team.id === "string" &&
+    typeof value.team.name === "string" &&
+    typeof value.team.slug === "string";
+  return (
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    typeof value.type === "string" &&
+    isWorkItemStatus(value.status) &&
+    isWorkItemPriority(value.priority) &&
+    (value.dueDate === null || typeof value.dueDate === "string") &&
+    validTeam &&
+    validAssignee
+  );
+}
+
+export async function listWorkItems(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  query: WorkItemListQuery,
+  signal?: AbortSignal,
+): Promise<WorkItemListPage> {
+  const params = new URLSearchParams({
+    teamId: query.teamId,
+    pageSize: String(query.pageSize ?? 25),
+  });
+  if (query.status) params.set("status", query.status);
+  if (query.priority) params.set("priority", query.priority);
+  if (query.search?.trim()) params.set("search", query.search.trim());
+  if (query.cursor) params.set("cursor", query.cursor);
+
+  const payload = await request(`/items?${params.toString()}`, { signal });
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !payload.data.every(isWorkItem) ||
+    !isRecord(payload.meta) ||
+    (payload.meta.nextCursor !== null &&
+      typeof payload.meta.nextCursor !== "string")
+  ) {
+    throw new ApiError(
+      "The backend returned an unexpected work-item list response.",
+      200,
+      "INVALID_RESPONSE",
+    );
+  }
+
+  return {
+    data: payload.data,
+    meta: { nextCursor: payload.meta.nextCursor },
+  };
+}
+
+function isAuthenticatedUser(value: unknown): value is AuthenticatedUser {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.id !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.email !== "string" ||
+    !Array.isArray(value.memberships)
+  ) {
+    return false;
+  }
+
+  return value.memberships.every(
+    (membership) =>
+      isRecord(membership) &&
+      ["VIEWER", "MEMBER", "LEAD", "ADMIN"].includes(String(membership.role)) &&
+      isRecord(membership.team) &&
+      typeof membership.team.id === "string" &&
+      typeof membership.team.name === "string" &&
+      typeof membership.team.slug === "string",
+  );
+}
+
+export async function loginWithPassword(
+  email: string,
+  password: string,
+): Promise<LoginResult> {
+  const payload = await apiRequest("/auth/login", {
+    method: "POST",
+    body: { email: email.trim(), password },
+  });
+
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    throw new ApiError("The backend returned an unexpected login response.", 200, "INVALID_RESPONSE");
+  }
+
+  const result = payload.data;
+  if (
+    typeof result.accessToken !== "string" ||
+    result.accessToken.length === 0 ||
+    result.tokenType !== "Bearer" ||
+    typeof result.expiresIn !== "string" ||
+    !isAuthenticatedUser(result.user)
+  ) {
+    throw new ApiError("The backend returned an unexpected login response.", 200, "INVALID_RESPONSE");
+  }
+
+  return {
+    accessToken: result.accessToken,
+    tokenType: "Bearer",
+    expiresIn: result.expiresIn,
+    user: result.user,
+  };
 }
