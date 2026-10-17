@@ -1,12 +1,67 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import heroImg from './assets/hero.png'
 import reactLogo from './assets/react.svg'
 import viteLogo from './assets/vite.svg'
+import { getBackendHealth } from './lib/api'
 import './App.css'
 
-function App() {
-  const [count, setCount] = useState(0)
+function BackendStatus() {
+  const [retry, setRetry] = useState(0)
+  const [state, setState] = useState<
+    | { status: 'loading' }
+    | { status: 'connected'; message: string }
+    | { status: 'error'; message: string }
+  >({ status: 'loading' })
 
+  useEffect(() => {
+    const controller = new AbortController()
+
+    getBackendHealth(controller.signal)
+      .then((health) => {
+        setState({ status: 'connected', message: health.message })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setState({
+          status: 'error',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to connect to the backend.',
+        })
+      })
+
+    return () => controller.abort()
+  }, [retry])
+
+  return (
+    <div className="backend-status" aria-live="polite">
+      <span className={`backend-status__indicator backend-status__indicator--${state.status}`} />
+      <div>
+        <strong>Backend</strong>
+        <p>
+          {state.status === 'loading' && 'Checking connection…'}
+          {state.status === 'connected' && state.message}
+          {state.status === 'error' && state.message}
+        </p>
+      </div>
+      {state.status === 'error' && (
+        <button
+          className="backend-status__retry"
+          type="button"
+          onClick={() => {
+            setState({ status: 'loading' })
+            setRetry((current) => current + 1)
+          }}
+        >
+          Retry
+        </button>
+      )}
+    </div>
+  )
+}
+
+function App() {
   return (
     <>
       <section id="center">
@@ -21,13 +76,7 @@ function App() {
             Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
           </p>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
+        <BackendStatus />
       </section>
 
       <div className="ticks"></div>

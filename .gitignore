@@ -4,6 +4,7 @@ node_modules/
 # Build output
 dist/
 coverage/
+backend/src/generated/prisma/
 
 # Environment variables and secrets
 .env
