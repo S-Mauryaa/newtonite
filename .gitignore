@@ -1,8 +1,22 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+coverage/
+
+# Environment variables and secrets
 .env
 .env.*
 !.env.example
 
+# Logs
+*.log
+npm-debug.log*
+
+# macOS
 .DS_Store
-coverage/
+
+# Test output
+playwright-report/
+test-results/
