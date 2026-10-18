@@ -473,9 +473,11 @@ interface WorkItemCommentsState {
 function WorkItemComments({
   itemId,
   canComment,
+  onCommentAdded,
 }: {
   itemId: string;
   canComment: boolean;
+  onCommentAdded: () => void;
 }) {
   const { authenticatedRequest } = useAuth();
   const [retry, setRetry] = useState(0);
@@ -540,6 +542,7 @@ function WorkItemComments({
         itemId,
         normalizedBody,
       );
+      onCommentAdded();
       setBody("");
       setSuccess("Comment added.");
       setState((current) => ({ ...current, loading: true, error: null }));
@@ -870,6 +873,7 @@ function WorkItemDetailsPanel({
   const [transitionSuccess, setTransitionSuccess] = useState("");
   const [pendingTransition, setPendingTransition] =
     useState<WorkItemStatus | null>(null);
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [hasConflict, setHasConflict] = useState(false);
   const saving = useRef(false);
   const claiming = useRef(false);
@@ -1327,13 +1331,16 @@ function WorkItemDetailsPanel({
             </p>
           )}
           <WorkItemActivityTimeline
-            key={`${item.id}:${item.version}`}
+            key={`${item.id}:${item.version}:${activityRefreshKey}`}
             itemId={item.id}
           />
           <WorkItemComments
             key={item.id}
             canComment={canEdit}
             itemId={item.id}
+            onCommentAdded={() =>
+              setActivityRefreshKey((value) => value + 1)
+            }
           />
         </>
       )}
