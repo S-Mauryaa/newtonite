@@ -129,6 +129,115 @@
   letter-spacing: -1px;
 }
 
+.dashboard {
+  margin-top: 24px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg), var(--accent-bg) 18%);
+}
+
+.dashboard__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.dashboard__heading h2 {
+  margin: 0;
+  color: var(--text-h);
+  font-size: 20px;
+}
+
+.dashboard__heading p {
+  margin: 5px 0 0;
+  font-size: 12px;
+}
+
+.dashboard__link {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.dashboard__link:hover {
+  text-decoration: underline;
+}
+
+.dashboard__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboard__metric {
+  display: flex;
+  min-height: 92px;
+  box-sizing: border-box;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text-h);
+  text-decoration: none;
+}
+
+.dashboard__metric span {
+  font-size: 12px;
+}
+
+.dashboard__metric strong {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.dashboard__status {
+  margin-top: 20px;
+}
+
+.dashboard__status h3 {
+  margin: 0 0 9px;
+  color: var(--text-h);
+  font-size: 14px;
+}
+
+.dashboard__status dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.dashboard__status dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 7px;
+  background: var(--bg);
+  font-size: 11px;
+}
+
+.dashboard__status dt {
+  color: var(--text);
+}
+
+.dashboard__status dd {
+  margin: 0;
+  color: var(--text-h);
+  font-weight: 700;
+}
+
+.dashboard__refresh {
+  margin-top: 14px;
+}
+
 .workspace-card__sign-out,
 .work-items__filter-button,
 .work-items__retry,
@@ -828,9 +937,22 @@
 
   .workspace-card__header,
   .work-items__heading,
-  .work-item-details__heading {
+  .work-item-details__heading,
+  .dashboard__heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .dashboard__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard__status dl {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard__link {
+    align-self: flex-start;
   }
 
   .workspace-card__sign-out {

@@ -191,6 +191,24 @@ export async function getBackendHealth(
   return { status: "ok", message: payload.message };
 }
 
+export async function getWorkItemDashboard(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  signal?: AbortSignal,
+): Promise<WorkItemDashboard> {
+  const payload = await request("/dashboard", { signal });
+  if (!isRecord(payload) || !isWorkItemDashboard(payload.data)) {
+    throw new ApiError(
+      "The backend returned an unexpected dashboard response.",
+      200,
+      "INVALID_RESPONSE",
+    );
+  }
+  return payload.data;
+}
+
 export type TeamRole = "VIEWER" | "MEMBER" | "LEAD" | "ADMIN";
 
 export interface AuthenticatedUser {
@@ -316,6 +334,14 @@ export interface WorkItemActivityPage {
   meta: { nextCursor: string | null };
 }
 
+export interface WorkItemDashboard {
+  assignedToMe: number;
+  unassignedUrgent: number;
+  awaitingApproval: number;
+  itemsByStatus: Record<WorkItemStatus, number>;
+  overdue: number;
+}
+
 export interface WorkItemComment {
   id: string;
   workItemId: string;
@@ -329,6 +355,35 @@ export interface WorkItemComment {
 function isWorkItemStatus(value: unknown): value is WorkItemStatus {
   return ["OPEN", "IN_PROGRESS", "AWAITING_APPROVAL", "RESOLVED", "CLOSED"].includes(
     String(value),
+  );
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isWorkItemDashboard(value: unknown): value is WorkItemDashboard {
+  if (
+    !isRecord(value) ||
+    !isNonNegativeInteger(value.assignedToMe) ||
+    !isNonNegativeInteger(value.unassignedUrgent) ||
+    !isNonNegativeInteger(value.awaitingApproval) ||
+    !isNonNegativeInteger(value.overdue) ||
+    !isRecord(value.itemsByStatus)
+  ) {
+    return false;
+  }
+  const itemsByStatus = value.itemsByStatus;
+
+  const statuses: WorkItemStatus[] = [
+    "OPEN",
+    "IN_PROGRESS",
+    "AWAITING_APPROVAL",
+    "RESOLVED",
+    "CLOSED",
+  ];
+  return statuses.every((status) =>
+    isNonNegativeInteger(itemsByStatus[status]),
   );
 }
 

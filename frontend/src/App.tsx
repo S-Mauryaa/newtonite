@@ -7,6 +7,7 @@ import {
   createWorkItem,
   createWorkItemComment,
   getBackendHealth,
+  getWorkItemDashboard,
   getWorkItemDetails,
   listWorkItems,
   listWorkItemActivity,
@@ -15,6 +16,7 @@ import {
   transitionWorkItem,
   type WorkItemActivityEvent,
   type WorkItemComment,
+  type WorkItemDashboard,
   type WorkItemType,
   type WorkItemDetails,
   type WorkItem,
@@ -1339,12 +1341,144 @@ function WorkItemDetailsPanel({
   );
 }
 
+type DashboardState =
+  | { requestKey: string; status: "loading" }
+  | { requestKey: string; status: "error"; message: string }
+  | {
+      requestKey: string;
+      status: "loaded";
+      dashboard: WorkItemDashboard;
+    };
+
+const dashboardMetrics = [
+  { key: "assignedToMe", label: "Assigned to me" },
+  { key: "unassignedUrgent", label: "Unassigned urgent" },
+  { key: "awaitingApproval", label: "Awaiting my approval" },
+  { key: "overdue", label: "Overdue" },
+] as const;
+
+const dashboardStatuses: WorkItemStatus[] = [
+  "OPEN",
+  "IN_PROGRESS",
+  "AWAITING_APPROVAL",
+  "RESOLVED",
+  "CLOSED",
+];
+
+function WorkItemDashboardPanel({
+  hasTeams,
+  refreshKey,
+  onRefresh,
+}: {
+  hasTeams: boolean;
+  refreshKey: number;
+  onRefresh: () => void;
+}) {
+  const { authenticatedRequest } = useAuth();
+  const [retry, setRetry] = useState(0);
+  const [state, setState] = useState<DashboardState>({
+    requestKey: "",
+    status: "loading",
+  });
+  const requestKey = `${refreshKey}:${retry}`;
+
+  useEffect(() => {
+    if (!hasTeams) return;
+    const controller = new AbortController();
+    getWorkItemDashboard(authenticatedRequest, controller.signal)
+      .then((dashboard) =>
+        setState({ requestKey, status: "loaded", dashboard }),
+      )
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setState({
+          requestKey,
+          status: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Unable to load the dashboard. Please try again.",
+        });
+      });
+    return () => controller.abort();
+  }, [authenticatedRequest, hasTeams, requestKey]);
+  const visibleState: DashboardState =
+    state.requestKey === requestKey
+      ? state
+      : { requestKey, status: "loading" };
+
+  return (
+    <section className="dashboard" aria-labelledby="dashboard-title">
+      <div className="dashboard__heading">
+        <div>
+          <h2 id="dashboard-title">Dashboard</h2>
+          <p>Metrics across all teams you belong to.</p>
+        </div>
+        <a className="dashboard__link" href="#work-items-title">
+          View work items
+        </a>
+      </div>
+      {!hasTeams ? (
+        <p className="work-items__message">
+          Join a team to see your operational dashboard.
+        </p>
+      ) : visibleState.status === "loading" ? (
+        <p className="work-items__message" role="status">
+          Loading dashboard…
+        </p>
+      ) : visibleState.status === "error" ? (
+        <div className="work-items__message work-items__message--error" role="alert">
+          <p>{visibleState.message}</p>
+          <button
+            className="work-items__retry"
+            onClick={() => setRetry((value) => value + 1)}
+            type="button"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="dashboard__metrics">
+            {dashboardMetrics.map(({ key, label }) => (
+              <div className="dashboard__metric" key={key}>
+                <span>{label}</span>
+                <strong>{visibleState.dashboard[key]}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="dashboard__status">
+            <h3>Work items by status</h3>
+            <dl>
+              {dashboardStatuses.map((status) => (
+                <div key={status}>
+                  <dt>{status.replaceAll("_", " ")}</dt>
+                  <dd>{visibleState.dashboard.itemsByStatus[status]}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+          <button
+            className="work-items__retry dashboard__refresh"
+            onClick={onRefresh}
+            type="button"
+          >
+            Refresh dashboard
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
+
 function WorkItemList({
   teamId,
   onTeamChange,
+  onDashboardRefresh,
 }: {
   teamId: string;
   onTeamChange: (teamId: string) => void;
+  onDashboardRefresh: () => void;
 }) {
   const { session, authenticatedRequest } = useAuth();
   const teams = session?.user.memberships ?? [];
@@ -1478,6 +1612,12 @@ function WorkItemList({
     setSearch("");
     setCursor(undefined);
     setRetry((current) => current + 1);
+    onDashboardRefresh();
+  }
+
+  function handleItemUpdated() {
+    retryRequest();
+    onDashboardRefresh();
   }
 
   if (teams.length === 0) {
@@ -1634,7 +1774,7 @@ function WorkItemList({
           key={selectedItemId}
           itemId={selectedItemId}
           onClose={() => setSelectedItemId(null)}
-          onUpdated={retryRequest}
+          onUpdated={handleItemUpdated}
         />
       )}
     </section>
@@ -1646,6 +1786,7 @@ function AuthenticatedPanel() {
   const [selectedTeamId, setSelectedTeamId] = useState(
     session?.user.memberships[0]?.team.id ?? "",
   );
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
   if (!session) return null;
 
   return (
@@ -1665,9 +1806,17 @@ function AuthenticatedPanel() {
           Sign out
         </button>
       </div>
+      <WorkItemDashboardPanel
+        hasTeams={session.user.memberships.length > 0}
+        onRefresh={() => setDashboardRefreshKey((value) => value + 1)}
+        refreshKey={dashboardRefreshKey}
+      />
       <WorkItemList
         teamId={selectedTeamId}
         onTeamChange={setSelectedTeamId}
+        onDashboardRefresh={() =>
+          setDashboardRefreshKey((value) => value + 1)
+        }
       />
     </section>
   );
