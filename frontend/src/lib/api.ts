@@ -201,6 +201,21 @@ export interface CreatedWorkItem {
   updatedAt: string;
 }
 
+export interface WorkItemDetails extends CreatedWorkItem {
+  team: { id: string; name: string; slug: string };
+  assignee: { id: string; name: string; email: string } | null;
+  createdBy: { id: string; name: string; email: string };
+}
+
+export interface UpdateWorkItemInput {
+  version: number;
+  title?: string;
+  description?: string;
+  type?: WorkItemType;
+  priority?: WorkItemPriority;
+  dueDate?: string | null;
+}
+
 export interface WorkItem {
   id: string;
   title: string;
@@ -261,6 +276,27 @@ function isCreatedWorkItem(value: unknown): value is CreatedWorkItem {
   );
 }
 
+function isWorkItemDetails(value: unknown): value is WorkItemDetails {
+  if (!isRecord(value)) return false;
+  const details = value;
+  return (
+    isCreatedWorkItem(details) &&
+    isRecord(details.team) &&
+    typeof details.team.id === "string" &&
+    typeof details.team.name === "string" &&
+    typeof details.team.slug === "string" &&
+    (details.assignee === null ||
+      (isRecord(details.assignee) &&
+        typeof details.assignee.id === "string" &&
+        typeof details.assignee.name === "string" &&
+        typeof details.assignee.email === "string")) &&
+    isRecord(details.createdBy) &&
+    typeof details.createdBy.id === "string" &&
+    typeof details.createdBy.name === "string" &&
+    typeof details.createdBy.email === "string"
+  );
+}
+
 export async function createWorkItem(
   request: (
     path: string,
@@ -288,6 +324,47 @@ export async function createWorkItem(
   }
 
   return { data: payload.data, replayed: payload.replayed };
+}
+
+export async function getWorkItemDetails(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  id: string,
+  signal?: AbortSignal,
+): Promise<WorkItemDetails> {
+  const payload = await request(`/items/${encodeURIComponent(id)}`, { signal });
+  if (!isRecord(payload) || !isWorkItemDetails(payload.data)) {
+    throw new ApiError(
+      "The backend returned an unexpected work-item details response.",
+      200,
+      "INVALID_RESPONSE",
+    );
+  }
+  return payload.data;
+}
+
+export async function updateWorkItem(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  id: string,
+  input: UpdateWorkItemInput,
+): Promise<CreatedWorkItem> {
+  const payload = await request(`/items/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: input,
+  });
+  if (!isRecord(payload) || !isCreatedWorkItem(payload.data)) {
+    throw new ApiError(
+      "The backend returned an unexpected work-item update response.",
+      200,
+      "INVALID_RESPONSE",
+    );
+  }
+  return payload.data;
 }
 
 function isWorkItem(value: unknown): value is WorkItem {

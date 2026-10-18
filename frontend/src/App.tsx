@@ -5,11 +5,15 @@ import {
   ApiError,
   createWorkItem,
   getBackendHealth,
+  getWorkItemDetails,
   listWorkItems,
+  updateWorkItem,
   type WorkItemType,
+  type WorkItemDetails,
   type WorkItem,
   type WorkItemPriority,
   type WorkItemStatus,
+  type UpdateWorkItemInput,
   type TeamRole,
 } from "./lib/api";
 import "./App.css";
@@ -406,6 +410,344 @@ function CreateWorkItemForm({
   );
 }
 
+interface WorkItemDraft {
+  title: string;
+  description: string;
+  type: WorkItemType;
+  priority: WorkItemPriority;
+  dueDate: string;
+}
+
+function draftFromWorkItem(item: WorkItemDetails): WorkItemDraft {
+  return {
+    title: item.title,
+    description: item.description,
+    type: item.type,
+    priority: item.priority,
+    dueDate: item.dueDate?.slice(0, 10) ?? "",
+  };
+}
+
+type WorkItemDetailsState =
+  | { itemId: string; status: "loading" }
+  | { itemId: string; status: "error"; message: string }
+  | { itemId: string; status: "loaded"; item: WorkItemDetails };
+
+function WorkItemDetailsPanel({
+  itemId,
+  onClose,
+  onUpdated,
+}: {
+  itemId: string;
+  onClose: () => void;
+  onUpdated: () => void;
+}) {
+  const { session, authenticatedRequest } = useAuth();
+  const [reload, setReload] = useState(0);
+  const [state, setState] = useState<WorkItemDetailsState>({
+    itemId,
+    status: "loading",
+  });
+  const [draft, setDraft] = useState<WorkItemDraft | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [hasConflict, setHasConflict] = useState(false);
+  const saving = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getWorkItemDetails(authenticatedRequest, itemId, controller.signal)
+      .then((item) => {
+        setState({ itemId, status: "loaded", item });
+        setDraft(draftFromWorkItem(item));
+        setError("");
+        setSuccess("");
+        setHasConflict(false);
+      })
+      .catch((requestError: unknown) => {
+        if (controller.signal.aborted) return;
+        setState({
+          itemId,
+          status: "error",
+          message:
+            requestError instanceof Error
+              ? requestError.message
+              : "Unable to load work-item details.",
+        });
+        setDraft(null);
+      });
+    return () => controller.abort();
+  }, [authenticatedRequest, itemId, reload]);
+
+  const currentState = state.itemId === itemId ? state : null;
+  const item = currentState?.status === "loaded" ? currentState.item : null;
+  const role = item
+    ? session?.user.memberships.find(
+        ({ team }) => team.id === item.teamId,
+      )?.role
+    : undefined;
+  const canEdit = role !== undefined && role !== "VIEWER";
+
+  function reloadDetails() {
+    setState({ itemId, status: "loading" });
+    setReload((value) => value + 1);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!item || !draft || saving.current || hasConflict) return;
+
+    const title = draft.title.trim();
+    if (!title) {
+      setError("Enter a title for the work item.");
+      setSuccess("");
+      return;
+    }
+    if (title.length > 200 || draft.description.length > 10000) {
+      setError("The title must be 200 characters or fewer and description must be 10,000 characters or fewer.");
+      setSuccess("");
+      return;
+    }
+    const parsedDueDate = draft.dueDate
+      ? new Date(`${draft.dueDate}T00:00:00.000Z`)
+      : null;
+    if (parsedDueDate && Number.isNaN(parsedDueDate.getTime())) {
+      setError("Enter a valid due date.");
+      setSuccess("");
+      return;
+    }
+
+    const input: UpdateWorkItemInput = {
+      version: item.version,
+      title,
+      description: draft.description,
+      type: draft.type,
+      priority: draft.priority,
+      dueDate: parsedDueDate?.toISOString() ?? null,
+    };
+    saving.current = true;
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const updated = await updateWorkItem(
+        authenticatedRequest,
+        item.id,
+        input,
+      );
+      const updatedDetails: WorkItemDetails = { ...item, ...updated };
+      setState({ itemId, status: "loaded", item: updatedDetails });
+      setDraft(draftFromWorkItem(updatedDetails));
+      setSuccess("Work-item changes saved.");
+      onUpdated();
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 409) {
+        setHasConflict(true);
+        setError(
+          "This work item changed after you opened it. Your edits were not saved. Reload the latest version before continuing.",
+        );
+      } else if (requestError instanceof ApiError && requestError.status === 400) {
+        setError(`Check the work-item details: ${requestError.message}`);
+      } else if (requestError instanceof ApiError && requestError.status === 403) {
+        setError("Your role in this team does not allow editing work items.");
+      } else if (requestError instanceof ApiError && requestError.status === 404) {
+        setError("This work item is no longer available to your team.");
+      } else {
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to save work-item changes. Please retry.",
+        );
+      }
+    } finally {
+      saving.current = false;
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section className="work-item-details" aria-labelledby="work-item-details-title">
+      <div className="work-item-details__heading">
+        <h2 id="work-item-details-title">Work-item details</h2>
+        <button
+          className="work-items__retry"
+          onClick={onClose}
+          type="button"
+        >
+          Back to list
+        </button>
+      </div>
+      {currentState?.status === "loading" && (
+        <p className="work-items__message" role="status">
+          Loading work-item details…
+        </p>
+      )}
+      {currentState?.status === "error" && (
+        <div className="work-items__message work-items__message--error" role="alert">
+          <p>{currentState.message}</p>
+          <button
+            className="work-items__retry"
+            onClick={reloadDetails}
+            type="button"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {item && draft && (
+        <>
+          <dl className="work-item-details__facts">
+            <div>
+              <dt>Status</dt>
+              <dd>{item.status.replaceAll("_", " ")}</dd>
+            </div>
+            <div>
+              <dt>Team</dt>
+              <dd>{item.team.name}</dd>
+            </div>
+            <div>
+              <dt>Assignee</dt>
+              <dd>{item.assignee?.name ?? "Unassigned"}</dd>
+            </div>
+            <div>
+              <dt>Created by</dt>
+              <dd>{item.createdBy.name}</dd>
+            </div>
+            <div>
+              <dt>Version</dt>
+              <dd>{item.version}</dd>
+            </div>
+            <div>
+              <dt>Last updated</dt>
+              <dd>{new Date(item.updatedAt).toLocaleString()}</dd>
+            </div>
+          </dl>
+          {canEdit ? (
+            <form className="work-item-details__form" onSubmit={handleSubmit}>
+              <label>
+                <span>Title</span>
+                <input
+                  aria-label="Work-item title"
+                  disabled={isSaving || hasConflict}
+                  maxLength={200}
+                  onChange={(event) =>
+                    setDraft({ ...draft, title: event.target.value })
+                  }
+                  required
+                  value={draft.title}
+                />
+              </label>
+              <label>
+                <span>Description</span>
+                <textarea
+                  aria-label="Work-item description"
+                  disabled={isSaving || hasConflict}
+                  maxLength={10000}
+                  onChange={(event) =>
+                    setDraft({ ...draft, description: event.target.value })
+                  }
+                  rows={4}
+                  value={draft.description}
+                />
+              </label>
+              <div className="create-work-item__options">
+                <label>
+                  <span>Type</span>
+                  <select
+                    aria-label="Work-item type"
+                    disabled={isSaving || hasConflict}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        type: event.target.value as WorkItemType,
+                      })
+                    }
+                    value={draft.type}
+                  >
+                    <option value="INCIDENT">Incident</option>
+                    <option value="CUSTOMER_ISSUE">Customer issue</option>
+                    <option value="PAYMENT">Payment</option>
+                    <option value="COMPLIANCE">Compliance</option>
+                    <option value="TASK">Task</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Priority</span>
+                  <select
+                    aria-label="Work-item priority"
+                    disabled={isSaving || hasConflict}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        priority: event.target.value as WorkItemPriority,
+                      })
+                    }
+                    value={draft.priority}
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                    <option value="URGENT">Urgent</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Due date</span>
+                  <input
+                    aria-label="Work-item due date"
+                    disabled={isSaving || hasConflict}
+                    onChange={(event) =>
+                      setDraft({ ...draft, dueDate: event.target.value })
+                    }
+                    type="date"
+                    value={draft.dueDate}
+                  />
+                </label>
+              </div>
+              {error && (
+                <p className="create-work-item__error" role="alert">
+                  {error}
+                </p>
+              )}
+              {success && (
+                <p className="create-work-item__success" role="status">
+                  {success}
+                </p>
+              )}
+              {hasConflict && (
+                <p className="work-item-details__conflict" role="note">
+                  Reloading the latest version will replace your unsaved edits.
+                </p>
+              )}
+              {hasConflict ? (
+                <button
+                  className="work-items__filter-button"
+                  onClick={reloadDetails}
+                  type="button"
+                >
+                  Reload latest version
+                </button>
+              ) : (
+                <button
+                  className="work-items__filter-button"
+                  disabled={isSaving}
+                  type="submit"
+                >
+                  {isSaving ? "Saving…" : "Save changes"}
+                </button>
+              )}
+            </form>
+          ) : (
+            <p className="work-item-details__readonly" role="status">
+              Your role in this team allows viewing but not editing this item.
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function WorkItemList({
   teamId,
   onTeamChange,
@@ -422,6 +764,7 @@ function WorkItemList({
   const [cursor, setCursor] = useState<string | undefined>();
   const [retry, setRetry] = useState(0);
   const [isCreating, setIsCreating] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [listState, setListState] = useState<WorkItemListState | null>(null);
   const filterKey = JSON.stringify([teamId, status, priority, search]);
 
@@ -498,6 +841,7 @@ function WorkItemList({
   function updateTeam(value: string) {
     onTeamChange(value);
     setCursor(undefined);
+    setSelectedItemId(null);
   }
 
   function updateStatus(value: WorkItemStatus | "") {
@@ -654,7 +998,15 @@ function WorkItemList({
             {visibleState.items.map((item) => (
               <li className="work-item" key={item.id}>
                 <div className="work-item__main">
-                  <h3>{item.title}</h3>
+                  <h3>
+                    <button
+                      className="work-item__open"
+                      onClick={() => setSelectedItemId(item.id)}
+                      type="button"
+                    >
+                      {item.title}
+                    </button>
+                  </h3>
                   <p>{item.type.replaceAll("_", " ")}</p>
                 </div>
                 <span className={`work-item__status work-item__status--${item.status.toLowerCase()}`}>
@@ -685,6 +1037,14 @@ function WorkItemList({
             </button>
           )}
         </>
+      )}
+      {selectedItemId && (
+        <WorkItemDetailsPanel
+          key={selectedItemId}
+          itemId={selectedItemId}
+          onClose={() => setSelectedItemId(null)}
+          onUpdated={retryRequest}
+        />
       )}
     </section>
   );

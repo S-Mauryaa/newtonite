@@ -155,6 +155,104 @@
   padding-top: 24px;
 }
 
+.work-item-details {
+  margin-top: 26px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg), var(--accent-bg) 18%);
+}
+
+.work-item-details__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.work-item-details__heading h2 {
+  margin: 0;
+  color: var(--text-h);
+  font-size: 18px;
+}
+
+.work-item-details__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.work-item-details__facts div {
+  min-width: 0;
+}
+
+.work-item-details__facts dt {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.work-item-details__facts dd {
+  margin: 4px 0 0;
+  color: var(--text-h);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.work-item-details__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.work-item-details__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-h);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.work-item-details__form input,
+.work-item-details__form textarea,
+.work-item-details__form select {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-h);
+  background: var(--bg);
+  font: inherit;
+  font-size: 13px;
+}
+
+.work-item-details__form textarea {
+  resize: vertical;
+}
+
+.work-item-details__form input:focus-visible,
+.work-item-details__form textarea:focus-visible,
+.work-item-details__form select:focus-visible,
+.work-item__open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.work-item-details__readonly,
+.work-item-details__conflict {
+  font-size: 13px;
+}
+
+.work-item-details__conflict {
+  margin: 0;
+}
+
 .work-items__heading {
   display: flex;
   align-items: flex-end;
@@ -348,6 +446,16 @@
   font-weight: 650;
 }
 
+.work-item__open {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .work-item__main p,
 .work-item__assignee,
 .work-item__due-date {
@@ -523,7 +631,8 @@
   }
 
   .workspace-card__header,
-  .work-items__heading {
+  .work-items__heading,
+  .work-item-details__heading {
     align-items: stretch;
     flex-direction: column;
   }
