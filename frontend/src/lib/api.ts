@@ -73,6 +73,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isActivityJsonValue(value: unknown): value is ActivityJsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.every(isActivityJsonValue);
+  return (
+    isRecord(value) &&
+    Object.values(value).every(isActivityJsonValue)
+  );
+}
+
+function isWorkItemActivityEvent(
+  value: unknown,
+): value is WorkItemActivityEvent {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.workItemId === "string" &&
+    typeof value.actorId === "string" &&
+    typeof value.action === "string" &&
+    (typeof value.previousValue === "string" || value.previousValue === null) &&
+    (typeof value.newValue === "string" || value.newValue === null) &&
+    isActivityJsonValue(value.metadata) &&
+    typeof value.createdAt === "string" &&
+    isRecord(value.actor) &&
+    typeof value.actor.id === "string" &&
+    typeof value.actor.name === "string"
+  );
+}
+
 export async function apiRequest(
   path: string,
   options: ApiRequestOptions = {},
@@ -238,6 +273,31 @@ export interface WorkItemListQuery {
 
 export interface WorkItemListPage {
   data: WorkItem[];
+  meta: { nextCursor: string | null };
+}
+
+export type ActivityJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ActivityJsonValue[]
+  | { [key: string]: ActivityJsonValue };
+
+export interface WorkItemActivityEvent {
+  id: string;
+  workItemId: string;
+  actorId: string;
+  action: string;
+  previousValue: string | null;
+  newValue: string | null;
+  metadata: ActivityJsonValue;
+  createdAt: string;
+  actor: { id: string; name: string };
+}
+
+export interface WorkItemActivityPage {
+  data: WorkItemActivityEvent[];
   meta: { nextCursor: string | null };
 }
 
@@ -419,6 +479,46 @@ export async function listWorkItems(
   ) {
     throw new ApiError(
       "The backend returned an unexpected work-item list response.",
+      200,
+      "INVALID_RESPONSE",
+    );
+  }
+
+  return {
+    data: payload.data,
+    meta: { nextCursor: payload.meta.nextCursor },
+  };
+}
+
+export async function listWorkItemActivity(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  itemId: string,
+  query: { cursor?: string; pageSize?: number } = {},
+  signal?: AbortSignal,
+): Promise<WorkItemActivityPage> {
+  const params = new URLSearchParams({
+    pageSize: String(query.pageSize ?? 50),
+  });
+  if (query.cursor) params.set("cursor", query.cursor);
+
+  const payload = await request(
+    `/items/${encodeURIComponent(itemId)}/activity?${params.toString()}`,
+    { signal },
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !payload.data.every(isWorkItemActivityEvent) ||
+    payload.data.some((event) => event.workItemId !== itemId) ||
+    !isRecord(payload.meta) ||
+    (payload.meta.nextCursor !== null &&
+      typeof payload.meta.nextCursor !== "string")
+  ) {
+    throw new ApiError(
+      "The backend returned an unexpected work-item activity response.",
       200,
       "INVALID_RESPONSE",
     );

@@ -7,7 +7,9 @@ import {
   getBackendHealth,
   getWorkItemDetails,
   listWorkItems,
+  listWorkItemActivity,
   updateWorkItem,
+  type WorkItemActivityEvent,
   type WorkItemType,
   type WorkItemDetails,
   type WorkItem,
@@ -428,6 +430,197 @@ function draftFromWorkItem(item: WorkItemDetails): WorkItemDraft {
   };
 }
 
+interface ActivityTimelineState {
+  events: WorkItemActivityEvent[];
+  nextCursor: string | null;
+  loading: boolean;
+  loadingMore: boolean;
+  error: string | null;
+  loadMoreError: string | null;
+}
+
+function WorkItemActivityTimeline({ itemId }: { itemId: string }) {
+  const { authenticatedRequest } = useAuth();
+  const [retry, setRetry] = useState(0);
+  const [state, setState] = useState<ActivityTimelineState>({
+    events: [],
+    nextCursor: null,
+    loading: true,
+    loadingMore: false,
+    error: null,
+    loadMoreError: null,
+  });
+  const loadingMore = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listWorkItemActivity(
+      authenticatedRequest,
+      itemId,
+      {},
+      controller.signal,
+    )
+      .then((page) => {
+        setState({
+          events: page.data,
+          nextCursor: page.meta.nextCursor,
+          loading: false,
+          loadingMore: false,
+          error: null,
+          loadMoreError: null,
+        });
+      })
+      .catch((requestError: unknown) => {
+        if (controller.signal.aborted) return;
+        setState((current) => ({
+          ...current,
+          loading: false,
+          error:
+            requestError instanceof Error
+              ? requestError.message
+              : "Unable to load activity. Please try again.",
+        }));
+      });
+    return () => controller.abort();
+  }, [authenticatedRequest, itemId, retry]);
+
+  async function loadMore() {
+    const cursor = state.nextCursor;
+    if (!cursor || loadingMore.current) return;
+
+    loadingMore.current = true;
+    setState((current) => ({
+      ...current,
+      loadingMore: true,
+      loadMoreError: null,
+    }));
+    try {
+      const page = await listWorkItemActivity(
+        authenticatedRequest,
+        itemId,
+        { cursor },
+      );
+      setState((current) => {
+        const existingIds = new Set(current.events.map((event) => event.id));
+        const newEvents = page.data.filter((event) => {
+          if (existingIds.has(event.id)) return false;
+          existingIds.add(event.id);
+          return true;
+        });
+        return {
+          ...current,
+          events: [...current.events, ...newEvents],
+          nextCursor: page.meta.nextCursor,
+          loadingMore: false,
+          loadMoreError: null,
+        };
+      });
+    } catch (requestError) {
+      setState((current) => ({
+        ...current,
+        loadingMore: false,
+        loadMoreError:
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to load more activity. Please try again.",
+      }));
+    } finally {
+      loadingMore.current = false;
+    }
+  }
+
+  return (
+    <section className="work-item-activity" aria-labelledby="work-item-activity-title">
+      <h3 id="work-item-activity-title">Activity</h3>
+      {state.loading && (
+        <p className="work-items__message" role="status">
+          Loading activity…
+        </p>
+      )}
+      {state.error && (
+        <div className="work-items__message work-items__message--error" role="alert">
+          <p>{state.error}</p>
+          <button
+            className="work-items__retry"
+            onClick={() => {
+              setState((current) => ({
+                ...current,
+                loading: true,
+                error: null,
+              }));
+              setRetry((value) => value + 1);
+            }}
+            type="button"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {!state.loading && !state.error && state.events.length === 0 && (
+        <p className="work-item-activity__empty" role="status">
+          No activity has been recorded for this item.
+        </p>
+      )}
+      {state.events.length > 0 && (
+        <ol className="work-item-activity__list">
+          {state.events.map((event) => {
+            const metadataField =
+              event.metadata !== null &&
+              typeof event.metadata === "object" &&
+              !Array.isArray(event.metadata) &&
+              typeof event.metadata.field === "string"
+                ? event.metadata.field
+                : null;
+            return (
+              <li className="work-item-activity__event" key={event.id}>
+                <div className="work-item-activity__event-heading">
+                  <strong>{event.action.replaceAll("_", " ")}</strong>
+                  <time dateTime={event.createdAt}>
+                    {new Date(event.createdAt).toLocaleString()}
+                  </time>
+                </div>
+                <p className="work-item-activity__actor">
+                  {event.actor.name}
+                  {metadataField ? ` · ${metadataField}` : ""}
+                </p>
+                {event.previousValue !== null && (
+                  <p className="work-item-activity__value">
+                    <span>Previous:</span> {event.previousValue}
+                  </p>
+                )}
+                {event.newValue !== null && (
+                  <p className="work-item-activity__value">
+                    <span>New:</span> {event.newValue}
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {state.loadMoreError && (
+        <p className="work-item-activity__error" role="alert">
+          {state.loadMoreError}
+        </p>
+      )}
+      {state.nextCursor && (
+        <button
+          className="work-items__load-more"
+          disabled={state.loadingMore}
+          onClick={loadMore}
+          type="button"
+        >
+          {state.loadingMore
+            ? "Loading activity…"
+            : state.loadMoreError
+              ? "Retry loading activity"
+              : "Load more activity"}
+        </button>
+      )}
+    </section>
+  );
+}
+
 type WorkItemDetailsState =
   | { itemId: string; status: "loading" }
   | { itemId: string; status: "error"; message: string }
@@ -742,6 +935,7 @@ function WorkItemDetailsPanel({
               Your role in this team allows viewing but not editing this item.
             </p>
           )}
+          <WorkItemActivityTimeline key={item.id} itemId={item.id} />
         </>
       )}
     </section>
