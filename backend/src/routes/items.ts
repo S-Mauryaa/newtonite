@@ -10,6 +10,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { authenticate } from "../middleware/authenticate";
 import { requireMembership, requireTeamWrite } from "../services/authorization";
+import { enqueueOutboxEvent } from "../services/outbox";
 import { validateTransition } from "../services/workflow";
 import { AppError } from "../utils/app-error";
 
@@ -134,13 +135,18 @@ itemsRouter.post("/", async (req, res) => {
           createdById: auth.userId,
         },
       });
-      await tx.activityEvent.create({
+      const activity = await tx.activityEvent.create({
         data: {
           workItemId: item.id,
           actorId: auth.userId,
           action: "CREATED",
           newValue: item.title,
         },
+      });
+      await enqueueOutboxEvent(tx, "WORK_ITEM_CREATED", {
+        workItemId: item.id,
+        actorId: auth.userId,
+        activityEventIds: [activity.id],
       });
 
       const response = {
@@ -275,13 +281,19 @@ itemsRouter.post("/:id/comments", async (req, res) => {
       data: { workItemId: item.id, authorId: auth.userId, body: input.body },
       include: { author: { select: { id: true, name: true } } },
     });
-    await tx.activityEvent.create({
+    const activity = await tx.activityEvent.create({
       data: {
         workItemId: item.id,
         actorId: auth.userId,
         action: "COMMENTED",
         newValue: created.id,
       },
+    });
+    await enqueueOutboxEvent(tx, "WORK_ITEM_COMMENTED", {
+      workItemId: item.id,
+      actorId: auth.userId,
+      commentId: created.id,
+      activityEventIds: [activity.id],
     });
     return created;
   });
@@ -311,6 +323,7 @@ itemsRouter.patch("/:id", async (req, res) => {
       throw new AppError(409, "VERSION_CONFLICT", "The work item changed; reload it and retry with the latest version");
     }
 
+    const activityEventIds: string[] = [];
     for (const field of ["title", "description", "type", "priority", "dueDate"] as const) {
       const nextValue = input[field];
       if (nextValue === undefined) continue;
@@ -318,7 +331,7 @@ itemsRouter.patch("/:id", async (req, res) => {
       const previousValue = previous instanceof Date ? previous.toISOString() : String(previous);
       const newValue = nextValue instanceof Date ? nextValue.toISOString() : String(nextValue);
       if (previousValue !== newValue) {
-        await tx.activityEvent.create({
+        const activity = await tx.activityEvent.create({
           data: {
             workItemId: item.id,
             actorId: auth.userId,
@@ -328,8 +341,14 @@ itemsRouter.patch("/:id", async (req, res) => {
             metadata: { field },
           },
         });
+        activityEventIds.push(activity.id);
       }
     }
+    await enqueueOutboxEvent(tx, "WORK_ITEM_UPDATED", {
+      workItemId: item.id,
+      actorId: auth.userId,
+      activityEventIds,
+    });
     return tx.workItem.findUniqueOrThrow({ where: { id: item.id } });
   });
   res.json({ data: updated });
@@ -349,7 +368,7 @@ itemsRouter.post("/:id/claim", async (req, res) => {
       throw new AppError(409, "CLAIM_CONFLICT", "This item is assigned or is no longer eligible to claim");
     }
     const updated = await tx.workItem.findUniqueOrThrow({ where: { id: item.id } });
-    await tx.activityEvent.create({
+    const activity = await tx.activityEvent.create({
       data: {
         workItemId: item.id,
         actorId: auth.userId,
@@ -357,6 +376,11 @@ itemsRouter.post("/:id/claim", async (req, res) => {
         previousValue: null,
         newValue: auth.userId,
       },
+    });
+    await enqueueOutboxEvent(tx, "WORK_ITEM_CLAIMED", {
+      workItemId: item.id,
+      actorId: auth.userId,
+      activityEventIds: [activity.id],
     });
     return updated;
   });
@@ -385,7 +409,7 @@ itemsRouter.post("/:id/transition", async (req, res) => {
     if (result.count !== 1) {
       throw new AppError(409, "VERSION_CONFLICT", "The work item changed; reload it and retry with the latest version");
     }
-    await tx.activityEvent.create({
+    const activity = await tx.activityEvent.create({
       data: {
         workItemId: item.id,
         actorId: auth.userId,
@@ -393,6 +417,11 @@ itemsRouter.post("/:id/transition", async (req, res) => {
         previousValue: item.status,
         newValue: input.status,
       },
+    });
+    await enqueueOutboxEvent(tx, "WORK_ITEM_STATUS_CHANGED", {
+      workItemId: item.id,
+      actorId: auth.userId,
+      activityEventIds: [activity.id],
     });
     return tx.workItem.findUniqueOrThrow({ where: { id: item.id } });
   });

@@ -24,13 +24,26 @@ An idempotency key is unique per authenticated user and operation. Its row, newl
 
 Creation, claim, field changes, transitions, and comments write audit events in the same transaction as their operation. A failed write rolls back its event. Foreign keys use restrictive deletion behavior so database-level deletes cannot silently erase audit history. The API does not offer item deletion.
 
-## 7. Defer the worker until core behavior is stable
+## 7. Use the transactional outbox for asynchronous domain events
 
-The schema includes an outbox model for future reliable background work, but this implementation does not enqueue or process jobs. A worker would need atomic job claiming, retry/backoff state, and idempotent handlers; claiming those features without implemented tests would overstate the system's guarantees.
+Successful item creation, updates, claims, workflow transitions, and comments enqueue one domain event in the same PostgreSQL transaction as the mutation and its existing activity event. The outbox references activity event IDs rather than duplicating the activity history. Creation replays through the existing idempotency-key path do not enqueue another event.
+
+An in-process worker starts with the API unless `OUTBOX_WORKER_ENABLED=false`. It claims due jobs in deterministic order inside a short transaction using `FOR UPDATE SKIP LOCKED`, then runs handlers outside the transaction so background work does not hold database locks or block HTTP handlers. Each job is acknowledged independently.
+
+Jobs move through `PENDING`, `PROCESSING`, `COMPLETED`, and terminal `FAILED` states using the existing outbox columns. Attempts use bounded exponential backoff (1 second base, 60 second cap, 5 attempts by default). Handlers receive an abort signal and time out after 30 seconds by default; `updatedAt` acts as the processing lease timestamp, and stale `PROCESSING` jobs are requeued after 60 seconds or failed when attempts are exhausted. The stale interval must exceed the handler timeout. A stale worker's update is guarded by its claimed attempt count, so it cannot overwrite a newer attempt.
+
+The current handler validates the supported event envelope and writes a safe operational log containing only the event ID and type. There is no external notification integration. Processing is at-least-once: a crash between handler execution and completion can cause a duplicate handler invocation. Future side-effecting consumers must be idempotent, such as by deduplicating on the outbox job ID. Terminal failure replay is an operator procedure and no management API exists yet.
+
+## 8. Limit repeated login attempts
+
+`POST /api/auth/login` uses an IP-keyed in-memory limiter with a 15-minute window and 10-attempt default. Both values are configurable and validated at startup. The route returns the regular JSON error envelope with HTTP 429 after the threshold; the response does not depend on whether the submitted email exists, and the window expires without permanently locking an account.
+
+The limiter uses the standard Express rate-limit package and its process-local memory store, which fits the current single-process deployment without adding infrastructure. Counters are not shared between Node.js processes or servers, so horizontal scaling requires a shared store. The application does not enable proxy trust; deployments behind a reverse proxy must configure trusted proxy hops deliberately to ensure the limiter sees the real client IP without accepting spoofed forwarding headers.
 
 ## Trade-offs and limitations
 
 - Prisma 7 uses the `@prisma/adapter-pg` driver adapter and an explicit generated-client output path.
 - Memberships are reloaded for protected requests so role changes take effect without waiting for a token to expire; this adds one small database lookup per request.
 - API tests use a separate PostgreSQL database and are intentionally guarded against a development database URL. They are not an in-memory substitute for PostgreSQL concurrency behavior.
-- The current frontend remains a Vite starter and has not yet been connected to the API.
+- The outbox worker and login rate-limit state are in-process with the API; the limiter is not shared across multiple instances.
+- Worker handlers are intentionally internal only; notifications, durable consumer receipts, and a failed-job replay interface remain future work.

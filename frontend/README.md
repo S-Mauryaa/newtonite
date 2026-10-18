@@ -1,32 +1,43 @@
-# React + TypeScript + Vite
+# Newtonite frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19, TypeScript, and Vite frontend for the Newtonite work management API.
 
-Currently, two official plugins are available:
+## Install
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+From `frontend/`:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm install
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The development API defaults to `http://localhost:5001/api`. Set `VITE_API_URL` if your local backend uses a different URL.
+
+## Run locally
+
+Start PostgreSQL and the backend first. From the repository root:
+
+```sh
+docker compose up -d postgres
+cd backend
+npm run dev
+```
+
+In a second terminal, from `frontend/`:
+
+```sh
+npm run dev
+```
+
+The Vite development server is available at `http://localhost:5173`.
+
+## Test and validate
+
+Run from `frontend/`:
+
+```sh
+npm test
+npm run lint
+npm run build
+```
+
+Tests use Vitest and React Testing Library with a jsdom environment. API responses are mocked at the `fetch` boundary using the backend's response envelopes; these tests do not replace live API or real-browser verification.

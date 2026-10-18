@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
+import express from "express";
 import jwt from "jsonwebtoken";
 import request from "supertest";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import app from "../src/app";
 import { env } from "../src/config/env";
 import { prisma } from "../src/lib/prisma";
+import { createLoginRateLimiter } from "../src/middleware/login-rate-limit";
+import { errorHandler } from "../src/middleware/error-handler";
+import { createAuthRouter } from "../src/routes/auth";
 
 const databaseName = new URL(env.DATABASE_URL).pathname.slice(1);
 if (!databaseName.endsWith("_test")) {
@@ -72,6 +76,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (!fixture) return;
+  for (const itemId of fixture.itemIds) {
+    await prisma.outboxJob.deleteMany({
+      where: { payload: { path: ["workItemId"], equals: itemId } },
+    });
+  }
   await prisma.activityEvent.deleteMany({ where: { workItem: { teamId: { in: fixture.teamIds } } } });
   await prisma.comment.deleteMany({ where: { workItem: { teamId: { in: fixture.teamIds } } } });
   await prisma.workItem.deleteMany({ where: { teamId: { in: fixture.teamIds } } });
@@ -105,6 +114,51 @@ describe("Newtonite API", () => {
       .send({ email: fixture.emails[0], password: "wrong-password" });
     expect(failure.status).toBe(401);
     expect(failure.body.error.code).toBe("INVALID_CREDENTIALS");
+
+    const unknownAccount = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "missing-user@test.invalid", password: "wrong-password" });
+    expect(unknownAccount.status).toBe(401);
+    expect(unknownAccount.body).toEqual(failure.body);
+  });
+
+  it("limits repeated login attempts and allows login again after the window expires", async () => {
+    const limitedApp = express();
+    limitedApp.use(express.json());
+    limitedApp.use(
+      "/api/auth",
+      createAuthRouter(createLoginRateLimiter({ windowMs: 500, maxAttempts: 2 })),
+    );
+    limitedApp.get("/api/health", (_req, res) => res.status(200).json({ status: "ok" }));
+    limitedApp.use(errorHandler);
+
+    const payload = { email: fixture.emails[0], password: "wrong-password" };
+    const successful = await request(limitedApp)
+      .post("/api/auth/login")
+      .send({ email: fixture.emails[0], password: fixture.password });
+    const firstFailure = await request(limitedApp).post("/api/auth/login").send(payload);
+    const secondFailure = await request(limitedApp).post("/api/auth/login").send(payload);
+    const limited = await request(limitedApp).post("/api/auth/login").send(payload);
+
+    expect(successful.status).toBe(200);
+    expect(firstFailure.status).toBe(401);
+    expect(firstFailure.body.error.code).toBe("INVALID_CREDENTIALS");
+    expect(secondFailure.status).toBe(401);
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({
+      error: {
+        code: "RATE_LIMITED",
+        message: "Too many login attempts. Please try again later.",
+      },
+    });
+    expect((await request(limitedApp).get("/api/health")).status).toBe(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    const recovered = await request(limitedApp)
+      .post("/api/auth/login")
+      .send({ email: fixture.emails[0], password: fixture.password });
+    expect(recovered.status).toBe(200);
+    expect(recovered.body.data.user.email).toBe(fixture.emails[0]);
   });
 
   it("requires authentication and hides another team's items", async () => {
@@ -120,8 +174,56 @@ describe("Newtonite API", () => {
   it("creates work items and their audit event atomically", async () => {
     const item = await createWorkItem();
     const events = await prisma.activityEvent.findMany({ where: { workItemId: item.id } });
+    const outbox = await prisma.outboxJob.findMany({
+      where: { payload: { path: ["workItemId"], equals: item.id } },
+    });
     expect(events).toHaveLength(1);
     expect(events[0].action).toBe("CREATED");
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0].type).toBe("WORK_ITEM_CREATED");
+    expect(outbox[0].payload).toMatchObject({
+      workItemId: item.id,
+      activityEventIds: [events[0].id],
+    });
+  });
+
+  it("writes outbox events for item updates, claims, transitions, and comments", async () => {
+    const item = await createWorkItem();
+    const authorization = "Bearer " + fixture.tokens.member;
+    const edit = await request(app)
+      .patch(`/api/items/${item.id}`)
+      .set("Authorization", authorization)
+      .send({ title: "Updated item", version: 1 });
+    const claim = await request(app)
+      .post(`/api/items/${item.id}/claim`)
+      .set("Authorization", authorization)
+      .send({});
+    const transition = await request(app)
+      .post(`/api/items/${item.id}/transition`)
+      .set("Authorization", authorization)
+      .send({ status: "IN_PROGRESS", version: 3 });
+    const comment = await request(app)
+      .post(`/api/items/${item.id}/comments`)
+      .set("Authorization", authorization)
+      .send({ body: "Checking event coverage." });
+
+    expect([edit.status, claim.status, transition.status, comment.status]).toEqual([
+      200,
+      200,
+      200,
+      201,
+    ]);
+    const outbox = await prisma.outboxJob.findMany({
+      where: { payload: { path: ["workItemId"], equals: item.id } },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(outbox.map(({ type }) => type)).toEqual([
+      "WORK_ITEM_CREATED",
+      "WORK_ITEM_UPDATED",
+      "WORK_ITEM_CLAIMED",
+      "WORK_ITEM_STATUS_CHANGED",
+      "WORK_ITEM_COMMENTED",
+    ]);
   });
 
   it("replays idempotent creation and rejects a changed payload", async () => {

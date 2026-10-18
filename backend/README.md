@@ -37,6 +37,12 @@ npm run dev
 
 The example environment defaults the API to port 5001; the value in your existing `backend/.env` is preserved and overrides that default. `GET /api/health` is a liveness check; `GET /api/ready` also checks PostgreSQL connectivity.
 
+`npm run dev` starts the API and, by default, its in-process transactional outbox worker. Set `OUTBOX_WORKER_ENABLED=false` to run the API without polling; domain events will still be enqueued and wait for a worker.
+
+Login attempts are limited per client IP using the Express in-memory rate-limit store. Defaults are 10 attempts per 15 minutes. Configure `LOGIN_RATE_LIMIT_MAX_ATTEMPTS` (1–100) and `LOGIN_RATE_LIMIT_WINDOW_MS` (1,000–86,400,000) in `backend/.env`; values are validated at startup. The `POST /api/auth/login` limit returns HTTP 429 with the standard API error envelope and applies the same response regardless of whether an email exists. The counter resets after the window; it does not lock accounts.
+
+The counter is local to one Node.js process, not shared across processes or servers. This matches the current single-process local deployment; if the API is scaled across instances, each instance has its own limit and a shared store should be configured before relying on a fleet-wide threshold. The app does not trust proxy headers by default; when deployed behind a reverse proxy, configure Express proxy trust only for known proxy hops so clients cannot spoof the IP used for limiting.
+
 ## Commands
 
 Run in `backend/`:
@@ -50,9 +56,23 @@ npm run db:studio
 npm run typecheck
 npm test
 npm run build
+npx prisma validate
+npx prisma migrate status
 ```
 
 Integration tests require `TEST_DATABASE_URL` to point to a separate database whose name ends in `_test`. They refuse to run against another database. `npm run db:test:migrate` applies the schema using that test URL and also refuses a database name without the `_test` suffix; never point it at the development database.
+
+## Transactional outbox
+
+Item creation, field updates, claims, workflow transitions, and comments create an `OutboxJob` in the same PostgreSQL transaction as the business change and its activity event. The outbox reuses the existing table; no new migration is required. The activity history remains the API-facing audit record, while the outbox contains one domain event per successful operation and references the corresponding activity event IDs.
+
+The worker starts with the API unless `OUTBOX_WORKER_ENABLED=false`. It claims due jobs in creation/schedule order using `FOR UPDATE SKIP LOCKED`, processes each independently, and marks successful jobs `COMPLETED`. The current internal handler validates supported work-item event envelopes and logs only the event ID and type; it does not send email, webhooks, or messages.
+
+Handler failures are retried with exponential delays starting at 1 second, doubling per attempt, and capped at 60 seconds by default. After 5 attempts a job becomes `FAILED`. Handlers are aborted after 30 seconds by default; an interrupted `PROCESSING` job is recovered after 60 seconds and scheduled for retry, or marked failed if its attempt limit was reached. The stale-processing interval must exceed the handler timeout. Error summaries store only the error class, not exception text, to avoid persisting secrets. Defaults can be tuned with `OUTBOX_POLL_INTERVAL_MS`, `OUTBOX_BATCH_SIZE`, `OUTBOX_MAX_ATTEMPTS`, `OUTBOX_RETRY_BASE_DELAY_MS`, `OUTBOX_RETRY_MAX_DELAY_MS`, `OUTBOX_PROCESSING_TIMEOUT_MS`, and `OUTBOX_STALE_PROCESSING_MS`; retry maximum must be at least the retry base. Environment values are validated at startup.
+
+Delivery is at least once: a process can fail after its handler runs but before completion is recorded, so a reclaimed job can be seen again. The current handler has no external side effect. Any future side-effecting handler must be idempotent (for example, by using the outbox job ID as its consumer idempotency key). Failed jobs are terminal and require an operator action; a management/replay API is not implemented.
+
+Run the outbox integration and recovery tests with `npm test` from `backend/`. They use `TEST_DATABASE_URL` and the separately migrated `_test` database.
 
 The repeatable seed creates three teams, ten local users, memberships, and ten representative work items. All demo users share `SEED_DEMO_PASSWORD`. Their local-only email addresses are:
 
@@ -118,11 +138,10 @@ Non-members receive the same 404 response for a work item as for a missing item,
 
 ## Connecting the frontend
 
-The frontend development origin is `http://localhost:5173` by default and is allowed by the backend CORS configuration. Call the backend at `http://localhost:5001`, retain the login `accessToken`, and send it as a bearer token on protected requests. The current frontend is a starter screen and does not yet call these endpoints.
+The frontend development origin is `http://localhost:5173` by default and is allowed by the backend CORS configuration. The frontend in `../frontend` integrates with these endpoints through its authenticated API client. Set `VITE_API_URL` only when the backend URL differs from `http://localhost:5001/api`.
 
 ## Current limitations
 
-- The outbox table is defined, but a background worker and retry processing are not implemented.
-- Login rate limiting and refresh tokens are not implemented.
+- Refresh tokens are not implemented.
 - There is no user/team administration API or public registration.
 - Integration tests require a separately configured PostgreSQL test database.
