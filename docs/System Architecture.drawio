@@ -1,0 +1,73 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="qMpNsc08-l6csIfhwYuk">
+    <mxGraphModel dx="1662" dy="1059" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-1" parent="1" style="swimlane;startSize=32;horizontal=1;fillColor=#e8f4f8;strokeColor=#6c8ebf;fontStyle=1;html=1;container=1;pointerEvents=0;" value="Frontend — React +amp; Vite" vertex="1">
+          <mxGeometry height="500" width="360" x="100" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-2" parent="SwGHsI1yIAqQU1E38qDv-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" value="Login and authentication UI" vertex="1">
+          <mxGeometry height="55" width="300" x="30" y="55" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-3" parent="SwGHsI1yIAqQU1E38qDv-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" value="Dashboard and metrics" vertex="1">
+          <mxGeometry height="55" width="300" x="30" y="125" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-4" parent="SwGHsI1yIAqQU1E38qDv-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" value="Work-item list, search, filters, pagination" vertex="1">
+          <mxGeometry height="55" width="300" x="30" y="195" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-5" parent="SwGHsI1yIAqQU1E38qDv-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" value="Work-item details and editing" vertex="1">
+          <mxGeometry height="55" width="300" x="30" y="265" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-6" parent="SwGHsI1yIAqQU1E38qDv-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" value="Claim and workflow actions" vertex="1">
+          <mxGeometry height="55" width="300" x="30" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-7" parent="SwGHsI1yIAqQU1E38qDv-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" value="Comments and activity timeline" vertex="1">
+          <mxGeometry height="55" width="300" x="30" y="405" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-8" parent="1" style="swimlane;startSize=32;horizontal=1;fillColor=#fff0e6;strokeColor=#d79b6b;fontStyle=1;html=1;container=1;pointerEvents=0;" value="Backend API — Node.js + Express + TypeScript" vertex="1">
+          <mxGeometry height="580" width="600" x="530" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-9" parent="SwGHsI1yIAqQU1E38qDv-8" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b6b;" value="Express REST API&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;JWT authentication • team authorization and role checks&lt;br&gt;Work-item CRUD • search, filters, cursor pagination&lt;br&gt;Atomic claiming • optimistic concurrency with version numbers&lt;br&gt;Idempotency • workflow and approval validation&lt;br&gt;Dashboard • activity history and comments • login rate limiting&lt;/font&gt;" vertex="1">
+          <mxGeometry height="190" width="540" x="30" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-10" parent="SwGHsI1yIAqQU1E38qDv-8" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e6;strokeColor=#d6b656;" value="In-Process Outbox Worker&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Claim due jobs • process internal domain events&lt;br&gt;Mark completed • bounded exponential backoff retries&lt;br&gt;Mark exhausted jobs as failed&lt;br&gt;Runs in the same backend process as the API&lt;/font&gt;" vertex="1">
+          <mxGeometry height="150" width="540" x="30" y="295" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-11" parent="SwGHsI1yIAqQU1E38qDv-8" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0050ef;strokeColor=#001DBC;dashed=1;fontStyle=2;html=1;fontColor=#ffffff;" value="Single backend process" vertex="1">
+          <mxGeometry height="45" width="240" x="180" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-12" edge="1" parent="SwGHsI1yIAqQU1E38qDv-8" source="SwGHsI1yIAqQU1E38qDv-9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#b45f06;strokeWidth=2;dashed=1;endArrow=classic;html=1;" target="SwGHsI1yIAqQU1E38qDv-10" value="Internal domain events">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-13" parent="1" style="swimlane;startSize=32;horizontal=1;fillColor=#e8f5e9;strokeColor=#82b366;fontStyle=1;html=1;container=1;pointerEvents=0;" value="PostgreSQL — Accessed through Prisma" vertex="1">
+          <mxGeometry height="500" width="390" x="1200" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-14" parent="SwGHsI1yIAqQU1E38qDv-13" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" value="Users&lt;br&gt;Teams&lt;br&gt;Memberships and roles&lt;br&gt;Work items&lt;br&gt;Comments&lt;br&gt;Activity events&lt;br&gt;Idempotency keys&lt;br&gt;Outbox jobs" vertex="1">
+          <mxGeometry height="250" width="280" x="55" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-15" parent="SwGHsI1yIAqQU1E38qDv-13" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff5;strokeColor=#82b366;fontSize=12;html=1;" value="Relevant work-item changes, activity events, and outbox records are written within the same database transaction" vertex="1">
+          <mxGeometry height="85" width="320" x="35" y="355" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-16" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;html=1;" value="User" vertex="1">
+          <mxGeometry height="60" width="100" x="100" y="910" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-17" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;fontSize=12;" value="Legend&lt;br&gt;&lt;font style=&quot;color:#3c78d8&quot;&gt;━━ HTTP requests&lt;/font&gt;&lt;br&gt;&lt;font style=&quot;color:#38761d&quot;&gt;━━ Database operations&lt;/font&gt;&lt;br&gt;&lt;font style=&quot;color:#b45f06&quot;&gt;╌╌ Async outbox processing&lt;/font&gt;" vertex="1">
+          <mxGeometry height="120" width="250" x="1200" y="900" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-18" edge="1" parent="1" source="SwGHsI1yIAqQU1E38qDv-16" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666666;strokeWidth=2;endArrow=classic;html=1;" target="SwGHsI1yIAqQU1E38qDv-1" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-19" edge="1" parent="1" source="SwGHsI1yIAqQU1E38qDv-1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#3c78d8;strokeWidth=2;endArrow=classic;html=1;" target="SwGHsI1yIAqQU1E38qDv-9" value="REST API — HTTP/JSON">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-20" edge="1" parent="1" source="SwGHsI1yIAqQU1E38qDv-9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#38761d;strokeWidth=2;endArrow=classic;html=1;" target="SwGHsI1yIAqQU1E38qDv-14" value="Database queries and transactions">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="SwGHsI1yIAqQU1E38qDv-21" edge="1" parent="1" source="SwGHsI1yIAqQU1E38qDv-10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#b45f06;strokeWidth=2;dashed=1;endArrow=classic;html=1;" target="SwGHsI1yIAqQU1E38qDv-14" value="Read and update outbox jobs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
