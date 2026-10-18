@@ -108,6 +108,21 @@ function isWorkItemActivityEvent(
   );
 }
 
+function isWorkItemComment(value: unknown): value is WorkItemComment {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.workItemId === "string" &&
+    typeof value.authorId === "string" &&
+    typeof value.body === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.updatedAt === "string" &&
+    isRecord(value.author) &&
+    typeof value.author.id === "string" &&
+    typeof value.author.name === "string"
+  );
+}
+
 export async function apiRequest(
   path: string,
   options: ApiRequestOptions = {},
@@ -299,6 +314,16 @@ export interface WorkItemActivityEvent {
 export interface WorkItemActivityPage {
   data: WorkItemActivityEvent[];
   meta: { nextCursor: string | null };
+}
+
+export interface WorkItemComment {
+  id: string;
+  workItemId: string;
+  authorId: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  author: { id: string; name: string };
 }
 
 function isWorkItemStatus(value: unknown): value is WorkItemStatus {
@@ -571,6 +596,59 @@ export async function listWorkItemActivity(
     data: payload.data,
     meta: { nextCursor: payload.meta.nextCursor },
   };
+}
+
+export async function listWorkItemComments(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  itemId: string,
+  signal?: AbortSignal,
+): Promise<WorkItemComment[]> {
+  const payload = await request(
+    `/items/${encodeURIComponent(itemId)}/comments`,
+    { signal },
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !payload.data.every(isWorkItemComment) ||
+    payload.data.some((comment) => comment.workItemId !== itemId)
+  ) {
+    throw new ApiError(
+      "The backend returned an unexpected work-item comments response.",
+      200,
+      "INVALID_RESPONSE",
+    );
+  }
+  return payload.data;
+}
+
+export async function createWorkItemComment(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  itemId: string,
+  body: string,
+): Promise<WorkItemComment> {
+  const payload = await request(
+    `/items/${encodeURIComponent(itemId)}/comments`,
+    { method: "POST", body: { body } },
+  );
+  if (
+    !isRecord(payload) ||
+    !isWorkItemComment(payload.data) ||
+    payload.data.workItemId !== itemId
+  ) {
+    throw new ApiError(
+      "The backend returned an unexpected work-item comment response.",
+      201,
+      "INVALID_RESPONSE",
+    );
+  }
+  return payload.data;
 }
 
 function isAuthenticatedUser(value: unknown): value is AuthenticatedUser {

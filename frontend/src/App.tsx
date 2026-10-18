@@ -5,13 +5,16 @@ import {
   ApiError,
   claimWorkItem,
   createWorkItem,
+  createWorkItemComment,
   getBackendHealth,
   getWorkItemDetails,
   listWorkItems,
   listWorkItemActivity,
+  listWorkItemComments,
   updateWorkItem,
   transitionWorkItem,
   type WorkItemActivityEvent,
+  type WorkItemComment,
   type WorkItemType,
   type WorkItemDetails,
   type WorkItem,
@@ -457,6 +460,199 @@ interface ActivityTimelineState {
   loadingMore: boolean;
   error: string | null;
   loadMoreError: string | null;
+}
+
+interface WorkItemCommentsState {
+  comments: WorkItemComment[];
+  loading: boolean;
+  error: string | null;
+}
+
+function WorkItemComments({
+  itemId,
+  canComment,
+}: {
+  itemId: string;
+  canComment: boolean;
+}) {
+  const { authenticatedRequest } = useAuth();
+  const [retry, setRetry] = useState(0);
+  const [state, setState] = useState<WorkItemCommentsState>({
+    comments: [],
+    loading: true,
+    error: null,
+  });
+  const [body, setBody] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitting = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listWorkItemComments(
+      authenticatedRequest,
+      itemId,
+      controller.signal,
+    )
+      .then((comments) => {
+        setState({ comments, loading: false, error: null });
+      })
+      .catch((requestError: unknown) => {
+        if (controller.signal.aborted) return;
+        setState((current) => ({
+          ...current,
+          loading: false,
+          error:
+            requestError instanceof Error
+              ? requestError.message
+              : "Unable to load comments. Please try again.",
+        }));
+      });
+    return () => controller.abort();
+  }, [authenticatedRequest, itemId, retry]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting.current || !canComment) return;
+
+    const normalizedBody = body.trim();
+    if (!normalizedBody) {
+      setSubmitError("Enter a comment before submitting.");
+      setSuccess("");
+      return;
+    }
+    if (normalizedBody.length > 5000) {
+      setSubmitError("Comments must be 5,000 characters or fewer.");
+      setSuccess("");
+      return;
+    }
+
+    submitting.current = true;
+    setIsSubmitting(true);
+    setSubmitError("");
+    setSuccess("");
+    try {
+      await createWorkItemComment(
+        authenticatedRequest,
+        itemId,
+        normalizedBody,
+      );
+      setBody("");
+      setSuccess("Comment added.");
+      setState((current) => ({ ...current, loading: true, error: null }));
+      setRetry((value) => value + 1);
+    } catch (requestError) {
+      if (
+        requestError instanceof ApiError &&
+        requestError.code === "FORBIDDEN"
+      ) {
+        setSubmitError("Your role in this team does not allow commenting.");
+      } else if (
+        requestError instanceof ApiError &&
+        requestError.code === "NOT_FOUND"
+      ) {
+        setSubmitError("This work item is no longer available to your team.");
+      } else if (
+        requestError instanceof ApiError &&
+        requestError.code === "VALIDATION_ERROR"
+      ) {
+        setSubmitError(`Check your comment: ${requestError.message}`);
+      } else {
+        setSubmitError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to add the comment. Please try again.",
+        );
+      }
+    } finally {
+      submitting.current = false;
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="work-item-comments" aria-labelledby="work-item-comments-title">
+      <h3 id="work-item-comments-title">Comments</h3>
+      {state.loading && (
+        <p className="work-items__message" role="status">
+          Loading comments…
+        </p>
+      )}
+      {state.error && (
+        <div className="work-items__message work-items__message--error" role="alert">
+          <p>{state.error}</p>
+          <button
+            className="work-items__retry"
+            onClick={() => {
+              setState((current) => ({
+                ...current,
+                loading: true,
+                error: null,
+              }));
+              setRetry((value) => value + 1);
+            }}
+            type="button"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {!state.loading && !state.error && state.comments.length === 0 && (
+        <p className="work-item-comments__empty" role="status">
+          No comments yet.
+        </p>
+      )}
+      {state.comments.length > 0 && (
+        <ol className="work-item-comments__list">
+          {state.comments.map((comment) => (
+            <li className="work-item-comments__entry" key={comment.id}>
+              <div className="work-item-comments__entry-heading">
+                <strong>{comment.author.name}</strong>
+                <time dateTime={comment.createdAt}>
+                  {new Date(comment.createdAt).toLocaleString()}
+                </time>
+              </div>
+              <p>{comment.body}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+      {success && (
+        <p className="create-work-item__success" role="status">
+          {success}
+        </p>
+      )}
+      {canComment ? (
+        <form className="work-item-comments__form" onSubmit={handleSubmit}>
+          <label htmlFor={`comment-${itemId}`}>Add a comment</label>
+          <textarea
+            id={`comment-${itemId}`}
+            maxLength={5000}
+            onChange={(event) => setBody(event.target.value)}
+            rows={3}
+            value={body}
+          />
+          {submitError && (
+            <p className="create-work-item__error" role="alert">
+              {submitError}
+            </p>
+          )}
+          <button
+            className="work-items__filter-button"
+            disabled={isSubmitting}
+            type="submit"
+          >
+            {isSubmitting ? "Adding comment…" : "Add comment"}
+          </button>
+        </form>
+      ) : (
+        <p className="work-item-comments__readonly" role="status">
+          Your role in this team allows viewing but not adding comments.
+        </p>
+      )}
+    </section>
+  );
 }
 
 function WorkItemActivityTimeline({ itemId }: { itemId: string }) {
@@ -1130,6 +1326,11 @@ function WorkItemDetailsPanel({
           )}
           <WorkItemActivityTimeline
             key={`${item.id}:${item.version}`}
+            itemId={item.id}
+          />
+          <WorkItemComments
+            key={item.id}
+            canComment={canEdit}
             itemId={item.id}
           />
         </>
