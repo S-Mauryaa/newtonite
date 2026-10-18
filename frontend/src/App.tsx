@@ -3,6 +3,7 @@ import { AuthProvider } from "./auth/AuthProvider";
 import { useAuth } from "./auth/useAuth";
 import {
   ApiError,
+  claimWorkItem,
   createWorkItem,
   getBackendHealth,
   getWorkItemDetails,
@@ -645,8 +646,12 @@ function WorkItemDetailsPanel({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [claimError, setClaimError] = useState("");
+  const [claimSuccess, setClaimSuccess] = useState("");
+  const [isClaiming, setIsClaiming] = useState(false);
   const [hasConflict, setHasConflict] = useState(false);
   const saving = useRef(false);
+  const claiming = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -681,10 +686,48 @@ function WorkItemDetailsPanel({
       )?.role
     : undefined;
   const canEdit = role !== undefined && role !== "VIEWER";
+  const canClaim =
+    canEdit && item?.status === "OPEN" && item.assigneeId === null;
 
   function reloadDetails() {
     setState({ itemId, status: "loading" });
     setReload((value) => value + 1);
+  }
+
+  async function handleClaim() {
+    if (!item || !canClaim || claiming.current) return;
+
+    claiming.current = true;
+    setIsClaiming(true);
+    setClaimError("");
+    setClaimSuccess("");
+    try {
+      await claimWorkItem(authenticatedRequest, item.id);
+      setClaimSuccess("Work item claimed successfully.");
+      reloadDetails();
+      onUpdated();
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.code === "CLAIM_CONFLICT") {
+        setClaimError(
+          "This item was claimed or became ineligible before your request completed. Its latest details are being loaded.",
+        );
+        reloadDetails();
+        onUpdated();
+      } else if (requestError instanceof ApiError && requestError.code === "FORBIDDEN") {
+        setClaimError("Your role in this team does not allow claiming work items.");
+      } else if (requestError instanceof ApiError && requestError.code === "NOT_FOUND") {
+        setClaimError("This item is no longer available to your team.");
+      } else {
+        setClaimError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to claim the work item. Please try again.",
+        );
+      }
+    } finally {
+      claiming.current = false;
+      setIsClaiming(false);
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -790,6 +833,16 @@ function WorkItemDetailsPanel({
       )}
       {item && draft && (
         <>
+          {claimError && (
+            <p className="create-work-item__error" role="alert">
+              {claimError}
+            </p>
+          )}
+          {claimSuccess && (
+            <p className="create-work-item__success" role="status">
+              {claimSuccess}
+            </p>
+          )}
           <dl className="work-item-details__facts">
             <div>
               <dt>Status</dt>
@@ -816,6 +869,18 @@ function WorkItemDetailsPanel({
               <dd>{new Date(item.updatedAt).toLocaleString()}</dd>
             </div>
           </dl>
+          {canClaim && (
+            <div className="work-item-details__claim">
+              <button
+                className="work-items__filter-button"
+                disabled={isClaiming}
+                onClick={handleClaim}
+                type="button"
+              >
+                {isClaiming ? "Claiming…" : "Claim this work item"}
+              </button>
+            </div>
+          )}
           {canEdit ? (
             <form className="work-item-details__form" onSubmit={handleSubmit}>
               <label>
@@ -935,7 +1000,10 @@ function WorkItemDetailsPanel({
               Your role in this team allows viewing but not editing this item.
             </p>
           )}
-          <WorkItemActivityTimeline key={item.id} itemId={item.id} />
+          <WorkItemActivityTimeline
+            key={`${item.id}:${item.version}`}
+            itemId={item.id}
+          />
         </>
       )}
     </section>

@@ -427,6 +427,26 @@ export async function updateWorkItem(
   return payload.data;
 }
 
+export async function claimWorkItem(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  id: string,
+): Promise<CreatedWorkItem> {
+  const payload = await request(`/items/${encodeURIComponent(id)}/claim`, {
+    method: "POST",
+  });
+  if (!isRecord(payload) || !isCreatedWorkItem(payload.data)) {
+    throw new ApiError(
+      "The backend returned an unexpected work-item claim response.",
+      200,
+      "INVALID_RESPONSE",
+    );
+  }
+  return payload.data;
+}
+
 function isWorkItem(value: unknown): value is WorkItem {
   if (!isRecord(value)) return false;
   const validAssignee =

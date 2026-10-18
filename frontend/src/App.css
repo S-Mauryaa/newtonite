@@ -253,6 +253,10 @@
   margin: 0;
 }
 
+.work-item-details__claim {
+  margin-bottom: 18px;
+}
+
 .work-item-activity {
   margin-top: 22px;
   padding-top: 18px;
