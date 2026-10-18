@@ -169,10 +169,42 @@ export type WorkItemStatus =
 
 export type WorkItemPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 
+export type WorkItemType =
+  | "INCIDENT"
+  | "CUSTOMER_ISSUE"
+  | "PAYMENT"
+  | "COMPLIANCE"
+  | "TASK";
+
+export interface CreateWorkItemInput {
+  title: string;
+  description: string;
+  type: WorkItemType;
+  priority: WorkItemPriority;
+  teamId: string;
+  dueDate?: string;
+}
+
+export interface CreatedWorkItem {
+  id: string;
+  title: string;
+  description: string;
+  type: WorkItemType;
+  priority: WorkItemPriority;
+  status: WorkItemStatus;
+  teamId: string;
+  assigneeId: string | null;
+  createdById: string;
+  dueDate: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WorkItem {
   id: string;
   title: string;
-  type: string;
+  type: WorkItemType;
   status: WorkItemStatus;
   priority: WorkItemPriority;
   dueDate: string | null;
@@ -204,6 +236,60 @@ function isWorkItemPriority(value: unknown): value is WorkItemPriority {
   return ["LOW", "MEDIUM", "HIGH", "URGENT"].includes(String(value));
 }
 
+function isWorkItemType(value: unknown): value is WorkItemType {
+  return ["INCIDENT", "CUSTOMER_ISSUE", "PAYMENT", "COMPLIANCE", "TASK"].includes(
+    String(value),
+  );
+}
+
+function isCreatedWorkItem(value: unknown): value is CreatedWorkItem {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    typeof value.description === "string" &&
+    isWorkItemType(value.type) &&
+    isWorkItemPriority(value.priority) &&
+    isWorkItemStatus(value.status) &&
+    typeof value.teamId === "string" &&
+    (typeof value.assigneeId === "string" || value.assigneeId === null) &&
+    typeof value.createdById === "string" &&
+    (typeof value.dueDate === "string" || value.dueDate === null) &&
+    typeof value.version === "number" &&
+    typeof value.createdAt === "string" &&
+    typeof value.updatedAt === "string"
+  );
+}
+
+export async function createWorkItem(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  input: CreateWorkItemInput,
+  idempotencyKey: string,
+): Promise<{ data: CreatedWorkItem; replayed: boolean }> {
+  const payload = await request("/items", {
+    method: "POST",
+    body: input,
+    idempotencyKey,
+  });
+
+  if (
+    !isRecord(payload) ||
+    !isCreatedWorkItem(payload.data) ||
+    typeof payload.replayed !== "boolean"
+  ) {
+    throw new ApiError(
+      "The backend returned an unexpected work-item creation response.",
+      201,
+      "INVALID_RESPONSE",
+    );
+  }
+
+  return { data: payload.data, replayed: payload.replayed };
+}
+
 function isWorkItem(value: unknown): value is WorkItem {
   if (!isRecord(value)) return false;
   const validAssignee =
@@ -219,7 +305,7 @@ function isWorkItem(value: unknown): value is WorkItem {
   return (
     typeof value.id === "string" &&
     typeof value.title === "string" &&
-    typeof value.type === "string" &&
+    isWorkItemType(value.type) &&
     isWorkItemStatus(value.status) &&
     isWorkItemPriority(value.priority) &&
     (value.dueDate === null || typeof value.dueDate === "string") &&

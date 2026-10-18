@@ -3,11 +3,14 @@ import { AuthProvider } from "./auth/AuthProvider";
 import { useAuth } from "./auth/useAuth";
 import {
   ApiError,
+  createWorkItem,
   getBackendHealth,
   listWorkItems,
+  type WorkItemType,
   type WorkItem,
   type WorkItemPriority,
   type WorkItemStatus,
+  type TeamRole,
 } from "./lib/api";
 import "./App.css";
 
@@ -176,16 +179,249 @@ interface WorkItemListState {
   error: string | null;
 }
 
-function WorkItemList() {
+function CreateWorkItemForm({
+  teamId,
+  role,
+  onCreated,
+  onSubmittingChange,
+}: {
+  teamId: string;
+  role: TeamRole | undefined;
+  onCreated: () => void;
+  onSubmittingChange: (submitting: boolean) => void;
+}) {
+  const { authenticatedRequest } = useAuth();
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [type, setType] = useState<WorkItemType>("TASK");
+  const [priority, setPriority] = useState<WorkItemPriority>("MEDIUM");
+  const [dueDate, setDueDate] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitting = useRef(false);
+  const pendingOperation = useRef<{ key: string; body: string } | null>(null);
+  const canCreate = role !== undefined && role !== "VIEWER";
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting.current) return;
+
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      setError("Enter a title for the work item.");
+      setSuccess("");
+      return;
+    }
+    if (normalizedTitle.length > 200) {
+      setError("The title must be 200 characters or fewer.");
+      setSuccess("");
+      return;
+    }
+    if (description.length > 10000) {
+      setError("The description must be 10,000 characters or fewer.");
+      setSuccess("");
+      return;
+    }
+    if (!teamId || !canCreate) {
+      setError("Your selected team role does not allow creating work items.");
+      setSuccess("");
+      return;
+    }
+
+    const parsedDueDate = dueDate
+      ? new Date(`${dueDate}T00:00:00.000Z`)
+      : undefined;
+    if (parsedDueDate && Number.isNaN(parsedDueDate.getTime())) {
+      setError("Enter a valid due date.");
+      setSuccess("");
+      return;
+    }
+
+    const input = {
+      title: normalizedTitle,
+      description,
+      type,
+      priority,
+      teamId,
+      ...(parsedDueDate
+        ? { dueDate: parsedDueDate.toISOString() }
+        : {}),
+    };
+    const serializedBody = JSON.stringify(input);
+    if (pendingOperation.current?.body !== serializedBody) {
+      pendingOperation.current = {
+        key: crypto.randomUUID(),
+        body: serializedBody,
+      };
+    }
+
+    submitting.current = true;
+    setIsSubmitting(true);
+    onSubmittingChange(true);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await createWorkItem(
+        authenticatedRequest,
+        input,
+        pendingOperation.current.key,
+      );
+      pendingOperation.current = null;
+      setTitle("");
+      setDescription("");
+      setType("TASK");
+      setPriority("MEDIUM");
+      setDueDate("");
+      setSuccess(`“${result.data.title}” was created successfully.`);
+      onCreated();
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 409) {
+        setError(
+          requestError.code === "REQUEST_IN_PROGRESS"
+            ? "This creation request is still processing. Retry without changing the form."
+            : requestError.code === "IDEMPOTENCY_KEY_REUSED"
+              ? "The request key conflicts with a previous submission. Change a field before submitting again."
+              : requestError.message,
+        );
+      } else if (requestError instanceof ApiError && requestError.status === 400) {
+        setError(`Check the work-item details: ${requestError.message}`);
+      } else if (requestError instanceof ApiError && requestError.status === 403) {
+        setError("Your role in this team does not allow creating work items.");
+      } else if (requestError instanceof ApiError && requestError.status === 404) {
+        setError("Your access to this team changed. Select an available team and retry.");
+      } else {
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to create the work item. Retry with the same details.",
+        );
+      }
+    } finally {
+      submitting.current = false;
+      setIsSubmitting(false);
+      onSubmittingChange(false);
+    }
+  }
+
+  return (
+    <details className="create-work-item">
+      <summary>Create work item</summary>
+      {!canCreate ? (
+        <p className="create-work-item__notice" role="status">
+          Your role in this team does not allow creating work items. Choose a team
+          where you have a member, lead, or admin role.
+        </p>
+      ) : (
+        <form className="create-work-item__form" onSubmit={handleSubmit}>
+          <p className="create-work-item__team">
+            Creating in the selected team. New work items start with OPEN status.
+          </p>
+          <label>
+            <span>Title</span>
+            <input
+              aria-label="New work-item title"
+              autoComplete="off"
+              disabled={isSubmitting}
+              maxLength={200}
+              onChange={(event) => setTitle(event.target.value)}
+              required
+              value={title}
+            />
+          </label>
+          <label>
+            <span>Description</span>
+            <textarea
+              aria-label="New work-item description"
+              disabled={isSubmitting}
+              maxLength={10000}
+              onChange={(event) => setDescription(event.target.value)}
+              rows={3}
+              value={description}
+            />
+          </label>
+          <div className="create-work-item__options">
+            <label>
+              <span>Type</span>
+              <select
+                aria-label="New work-item type"
+                disabled={isSubmitting}
+                onChange={(event) => setType(event.target.value as WorkItemType)}
+                value={type}
+              >
+                <option value="INCIDENT">Incident</option>
+                <option value="CUSTOMER_ISSUE">Customer issue</option>
+                <option value="PAYMENT">Payment</option>
+                <option value="COMPLIANCE">Compliance</option>
+                <option value="TASK">Task</option>
+              </select>
+            </label>
+            <label>
+              <span>Priority</span>
+              <select
+                aria-label="New work-item priority"
+                disabled={isSubmitting}
+                onChange={(event) =>
+                  setPriority(event.target.value as WorkItemPriority)
+                }
+                value={priority}
+              >
+                <option value="LOW">Low</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option>
+                <option value="URGENT">Urgent</option>
+              </select>
+            </label>
+            <label>
+              <span>Due date</span>
+              <input
+                aria-label="New work-item due date"
+                disabled={isSubmitting}
+                onChange={(event) => setDueDate(event.target.value)}
+                type="date"
+                value={dueDate}
+              />
+            </label>
+          </div>
+          {error && (
+            <p className="create-work-item__error" role="alert">
+              {error}
+            </p>
+          )}
+          {success && (
+            <p className="create-work-item__success" role="status">
+              {success}
+            </p>
+          )}
+          <button
+            className="work-items__filter-button"
+            disabled={isSubmitting}
+            type="submit"
+          >
+            {isSubmitting ? "Creating…" : "Create work item"}
+          </button>
+        </form>
+      )}
+    </details>
+  );
+}
+
+function WorkItemList({
+  teamId,
+  onTeamChange,
+}: {
+  teamId: string;
+  onTeamChange: (teamId: string) => void;
+}) {
   const { session, authenticatedRequest } = useAuth();
   const teams = session?.user.memberships ?? [];
-  const [teamId, setTeamId] = useState(teams[0]?.team.id ?? "");
   const [status, setStatus] = useState<WorkItemStatus | "">("");
   const [priority, setPriority] = useState<WorkItemPriority | "">("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [cursor, setCursor] = useState<string | undefined>();
   const [retry, setRetry] = useState(0);
+  const [isCreating, setIsCreating] = useState(false);
   const [listState, setListState] = useState<WorkItemListState | null>(null);
   const filterKey = JSON.stringify([teamId, status, priority, search]);
 
@@ -243,7 +479,16 @@ function WorkItemList() {
       });
 
     return () => controller.abort();
-  }, [authenticatedRequest, cursor, filterKey, priority, retry, search, status, teamId]);
+  }, [
+    authenticatedRequest,
+    cursor,
+    filterKey,
+    priority,
+    retry,
+    search,
+    status,
+    teamId,
+  ]);
 
   const visibleState =
     listState?.teamId === teamId && listState.filtersKey === filterKey
@@ -251,7 +496,7 @@ function WorkItemList() {
       : null;
 
   function updateTeam(value: string) {
-    setTeamId(value);
+    onTeamChange(value);
     setCursor(undefined);
   }
 
@@ -291,6 +536,15 @@ function WorkItemList() {
     setCursor(visibleState.nextCursor);
   }
 
+  function handleCreated() {
+    setStatus("");
+    setPriority("");
+    setSearchInput("");
+    setSearch("");
+    setCursor(undefined);
+    setRetry((current) => current + 1);
+  }
+
   if (teams.length === 0) {
     return (
       <section className="work-items" aria-labelledby="work-items-title">
@@ -311,6 +565,7 @@ function WorkItemList() {
           <span>Team</span>
           <select
             aria-label="Team"
+            disabled={isCreating}
             onChange={(event) => updateTeam(event.target.value)}
             value={teamId}
           >
@@ -322,6 +577,13 @@ function WorkItemList() {
           </select>
         </label>
       </div>
+
+      <CreateWorkItemForm
+        teamId={teamId}
+        role={teams.find(({ team }) => team.id === teamId)?.role}
+        onCreated={handleCreated}
+        onSubmittingChange={setIsCreating}
+      />
 
       <form className="work-item-filters" onSubmit={applyFilters}>
         <label>
@@ -430,6 +692,9 @@ function WorkItemList() {
 
 function AuthenticatedPanel() {
   const { session, logout } = useAuth();
+  const [selectedTeamId, setSelectedTeamId] = useState(
+    session?.user.memberships[0]?.team.id ?? "",
+  );
   if (!session) return null;
 
   return (
@@ -449,7 +714,10 @@ function AuthenticatedPanel() {
           Sign out
         </button>
       </div>
-      <WorkItemList />
+      <WorkItemList
+        teamId={selectedTeamId}
+        onTeamChange={setSelectedTeamId}
+      />
     </section>
   );
 }

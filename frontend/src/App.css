@@ -194,6 +194,102 @@
   min-width: 190px;
 }
 
+.create-work-item {
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg), var(--accent-bg) 25%);
+}
+
+.create-work-item summary {
+  color: var(--text-h);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.create-work-item__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.create-work-item__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-h);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.create-work-item__form input,
+.create-work-item__form textarea,
+.create-work-item__form select {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-h);
+  background: var(--bg);
+  font: inherit;
+  font-size: 13px;
+}
+
+.create-work-item__form textarea {
+  resize: vertical;
+}
+
+.create-work-item__form input:focus-visible,
+.create-work-item__form textarea:focus-visible,
+.create-work-item__form select:focus-visible,
+.create-work-item summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.create-work-item__options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.create-work-item__team,
+.create-work-item__notice {
+  font-size: 12px;
+}
+
+.create-work-item__notice {
+  margin-top: 12px;
+}
+
+.create-work-item__error,
+.create-work-item__success {
+  font-size: 13px;
+}
+
+.create-work-item__error {
+  color: #b42318;
+}
+
+.create-work-item__success {
+  color: #16834a;
+}
+
+.create-work-item__form .work-items__filter-button {
+  align-self: flex-start;
+  min-width: 160px;
+}
+
+.create-work-item__form .work-items__filter-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .work-item-filters {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(145px, 0.55fr)) auto;
@@ -442,6 +538,10 @@
 
   .work-item-filters label:first-child {
     grid-column: 1 / -1;
+  }
+
+  .create-work-item__options {
+    grid-template-columns: 1fr;
   }
 
   .work-items__filter-button {
