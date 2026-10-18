@@ -257,6 +257,22 @@
   margin-bottom: 18px;
 }
 
+.work-item-details__transitions {
+  margin-bottom: 18px;
+}
+
+.work-item-details__transitions h3 {
+  margin: 0 0 10px;
+  color: var(--text-h);
+  font-size: 14px;
+}
+
+.work-item-details__transition-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .work-item-activity {
   margin-top: 22px;
   padding-top: 18px;

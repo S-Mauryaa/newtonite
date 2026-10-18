@@ -10,6 +10,7 @@ import {
   listWorkItems,
   listWorkItemActivity,
   updateWorkItem,
+  transitionWorkItem,
   type WorkItemActivityEvent,
   type WorkItemType,
   type WorkItemDetails,
@@ -431,6 +432,24 @@ function draftFromWorkItem(item: WorkItemDetails): WorkItemDraft {
   };
 }
 
+function availableTransitions(
+  status: WorkItemStatus,
+  role: TeamRole | undefined,
+): WorkItemStatus[] {
+  if (role === undefined || role === "VIEWER") return [];
+  const transitions: Record<WorkItemStatus, WorkItemStatus[]> = {
+    OPEN: ["IN_PROGRESS"],
+    IN_PROGRESS: ["OPEN", "AWAITING_APPROVAL"],
+    AWAITING_APPROVAL: [
+      "IN_PROGRESS",
+      ...(role === "LEAD" || role === "ADMIN" ? ["RESOLVED" as const] : []),
+    ],
+    RESOLVED: ["IN_PROGRESS", "CLOSED"],
+    CLOSED: [],
+  };
+  return transitions[status];
+}
+
 interface ActivityTimelineState {
   events: WorkItemActivityEvent[];
   nextCursor: string | null;
@@ -649,9 +668,14 @@ function WorkItemDetailsPanel({
   const [claimError, setClaimError] = useState("");
   const [claimSuccess, setClaimSuccess] = useState("");
   const [isClaiming, setIsClaiming] = useState(false);
+  const [transitionError, setTransitionError] = useState("");
+  const [transitionSuccess, setTransitionSuccess] = useState("");
+  const [pendingTransition, setPendingTransition] =
+    useState<WorkItemStatus | null>(null);
   const [hasConflict, setHasConflict] = useState(false);
   const saving = useRef(false);
   const claiming = useRef(false);
+  const transitioning = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -688,6 +712,9 @@ function WorkItemDetailsPanel({
   const canEdit = role !== undefined && role !== "VIEWER";
   const canClaim =
     canEdit && item?.status === "OPEN" && item.assigneeId === null;
+  const transitions = item
+    ? availableTransitions(item.status, role)
+    : [];
 
   function reloadDetails() {
     setState({ itemId, status: "loading" });
@@ -727,6 +754,77 @@ function WorkItemDetailsPanel({
     } finally {
       claiming.current = false;
       setIsClaiming(false);
+    }
+  }
+
+  async function handleTransition(targetStatus: WorkItemStatus) {
+    if (!item || !transitions.includes(targetStatus) || transitioning.current) {
+      return;
+    }
+
+    transitioning.current = true;
+    setPendingTransition(targetStatus);
+    setTransitionError("");
+    setTransitionSuccess("");
+    try {
+      const updated = await transitionWorkItem(
+        authenticatedRequest,
+        item.id,
+        targetStatus,
+        item.version,
+      );
+      setTransitionSuccess(
+        `Work item moved to ${updated.status.replaceAll("_", " ")}.`,
+      );
+      reloadDetails();
+      onUpdated();
+    } catch (requestError) {
+      if (
+        requestError instanceof ApiError &&
+        requestError.code === "VERSION_CONFLICT"
+      ) {
+        setTransitionError(
+          "This work item changed after it was loaded. The transition was not applied; reloading the latest state.",
+        );
+        reloadDetails();
+        onUpdated();
+      } else if (
+        requestError instanceof ApiError &&
+        requestError.code === "INVALID_TRANSITION"
+      ) {
+        setTransitionError(
+          "That transition is no longer allowed for the work item’s current status.",
+        );
+        reloadDetails();
+      } else if (
+        requestError instanceof ApiError &&
+        requestError.code === "FORBIDDEN"
+      ) {
+        setTransitionError(
+          "Your role in this team does not allow this workflow transition.",
+        );
+      } else if (
+        requestError instanceof ApiError &&
+        requestError.code === "VALIDATION_ERROR"
+      ) {
+        setTransitionError(
+          `The backend rejected the transition request: ${requestError.message}`,
+        );
+      } else if (
+        requestError instanceof ApiError &&
+        requestError.code === "NOT_FOUND"
+      ) {
+        setTransitionError("This work item is no longer available to your team.");
+      } else {
+        setTransitionError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to update the work-item status. Please try again.",
+        );
+      }
+    } finally {
+      transitioning.current = false;
+      setPendingTransition(null);
     }
   }
 
@@ -843,6 +941,16 @@ function WorkItemDetailsPanel({
               {claimSuccess}
             </p>
           )}
+          {transitionError && (
+            <p className="create-work-item__error" role="alert">
+              {transitionError}
+            </p>
+          )}
+          {transitionSuccess && (
+            <p className="create-work-item__success" role="status">
+              {transitionSuccess}
+            </p>
+          )}
           <dl className="work-item-details__facts">
             <div>
               <dt>Status</dt>
@@ -879,6 +987,26 @@ function WorkItemDetailsPanel({
               >
                 {isClaiming ? "Claiming…" : "Claim this work item"}
               </button>
+            </div>
+          )}
+          {transitions.length > 0 && (
+            <div className="work-item-details__transitions">
+              <h3>Workflow</h3>
+              <div className="work-item-details__transition-actions">
+                {transitions.map((targetStatus) => (
+                  <button
+                    className="work-items__filter-button"
+                    disabled={pendingTransition !== null}
+                    key={targetStatus}
+                    onClick={() => handleTransition(targetStatus)}
+                    type="button"
+                  >
+                    {pendingTransition === targetStatus
+                      ? "Updating status…"
+                      : `Move to ${targetStatus.replaceAll("_", " ")}`}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {canEdit ? (

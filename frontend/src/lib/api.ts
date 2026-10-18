@@ -447,6 +447,29 @@ export async function claimWorkItem(
   return payload.data;
 }
 
+export async function transitionWorkItem(
+  request: (
+    path: string,
+    options?: AuthenticatedApiRequestOptions,
+  ) => Promise<unknown>,
+  id: string,
+  status: WorkItemStatus,
+  version: number,
+): Promise<CreatedWorkItem> {
+  const payload = await request(`/items/${encodeURIComponent(id)}/transition`, {
+    method: "POST",
+    body: { status, version },
+  });
+  if (!isRecord(payload) || !isCreatedWorkItem(payload.data)) {
+    throw new ApiError(
+      "The backend returned an unexpected work-item transition response.",
+      200,
+      "INVALID_RESPONSE",
+    );
+  }
+  return payload.data;
+}
+
 function isWorkItem(value: unknown): value is WorkItem {
   if (!isRecord(value)) return false;
   const validAssignee =
